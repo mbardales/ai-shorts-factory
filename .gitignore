@@ -1,0 +1,60 @@
+# Secretos y credenciales
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env.local
+*.egg-info/
+
+# Entornos virtuales
+env/
+ENV/
+
+# Builds y artefactos generados
+dist/
+build/
+out/
+target/
+*.pyc
+*.pyo
+
+# Archivos generados / temporales
+*.log
+logs/*
+!logs/.gitkeep
+tmp/
+temp/
+*.tmp
+
+# Backups
+backups/*
+!backups/.gitkeep
+
+# Activos multimedia generados (no versionar contenido pesado/derivado)
+assets/audio/generated/
+assets/music/generated/
+
+# IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Documentación generada
+docs/generated/
