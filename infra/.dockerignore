@@ -1,0 +1,44 @@
+# .dockerignore para el contexto de build de la imagen n8n de producción.
+#
+# La imagen de n8n no copia archivos del contexto (solo extiende la imagen
+# oficial), por lo que se excluye todo lo innecesario para reducir el contexto
+# y evitar filtrar secretos.
+
+# Control de versiones
+.git
+.gitignore
+.gitattributes
+
+# Secretos (nunca deben entrar en el build)
+.env
+.env.*
+*.pem
+*.key
+
+# Entornos de desarrollo y dependencias
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Artefactos de build y archivos temporales
+dist/
+build/
+out/
+target/
+*.log
+tmp/
+temp/
+*.tmp
+
+# Documentación y áreas del repositorio no necesarias en runtime
+*.md
+docs/
+config/
+prompts/
+workflows/
+assets/
+examples/
+scripts/
+backups/
+logs/

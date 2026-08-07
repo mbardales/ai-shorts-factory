@@ -1,0 +1,52 @@
+{
+  "_description": "Configuración general de la aplicación AI Shorts Factory. Define idioma, rutas de directorios, logging y valores por defecto. Los valores con 'REEMPLAZAR' deben completarse.",
+  "idioma": "es",
+  "zonas_horarias": {
+    "default": "<REEMPLAZAR: ej. America/Lima>"
+  },
+  "directorios": {
+    "_description": "Mapeo de rutas según la estructura del repositorio. Rutas relativas a la raíz del proyecto.",
+    "prompts": "prompts",
+    "workflows": "workflows",
+    "assets": "assets",
+    "config": "config",
+    "docs": "docs",
+    "ejemplos": "examples",
+    "scripts": "scripts",
+    "backups": "backups",
+    "logs": "logs"
+  },
+  "logging": {
+    "nivel": "info",
+    "formato": "texto",
+    "archivo_salida": "logs/aplicacion.log",
+    "rotacion": {
+      "_description": "Política prevista para rotación de archivos de log.",
+      "habilitada": false,
+      "max_tamano_mb": 10,
+      "copias": 5
+    }
+  },
+  "ejecucion": {
+    "modo": "<REEMPLAZAR: ej. local, produccion>",
+    "tiempo_espera_maximo_segundos": 300,
+    "reintentos": 3
+  },
+  "seguridad": {
+    "validacion_entradas": true,
+    "gestion_secretos": "variables de entorno",
+    "permitir_depuracion": false
+  },
+  "valores_por_defecto": {
+    "moneda": "<REEMPLAZAR: ej. USD>",
+    "formato_fecha": "AAAA-MM-DD"
+  },
+  "pendientes": {
+    "_description": "Pendientes conocidos de configuración. No son funcionalidades inventadas; reflejan decisiones pendientes de la fase de definición.",
+    "items": [
+      "Elegir el lenguaje de programación y el sistema de build.",
+      "Definir la gestión de secretos en el entorno de ejecución.",
+      "Definir la política de rotación de logs cuando exista stack."
+    ]
+  }
+}

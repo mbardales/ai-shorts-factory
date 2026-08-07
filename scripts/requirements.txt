@@ -1,0 +1,9 @@
+# Dependencias de Python para el cliente de prueba de Gemini (scripts/).
+#
+# Instalación:
+#   pip install -r scripts/requirements.txt
+#
+# google-genai: SDK oficial de Google para el Gemini API (Cliente Gen AI).
+# python-dotenv: carga de variables de entorno desde un archivo ".env".
+google-genai>=1.0.0
+python-dotenv>=1.0.1

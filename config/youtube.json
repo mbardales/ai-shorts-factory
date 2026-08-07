@@ -1,0 +1,61 @@
+{
+  "_description": "Configuración de integración con YouTube para AI Shorts Factory. Cubre credenciales (por referencia a variables de entorno), parámetros de análisis y de publicación de Shorts. Los valores con 'REEMPLAZAR' deben completarse.",
+  "api": {
+    "version": "v3",
+    "base_url": "https://www.googleapis.com/youtube/v3",
+    "auth": {
+      "_description": "La clave de API y las credenciales OAuth no se almacenan en este archivo.",
+      "api_key_env": "YOUTUBE_API_KEY",
+      "oauth_client_id_env": "YOUTUBE_CLIENT_ID",
+      "oauth_client_secret_env": "YOUTUBE_CLIENT_SECRET",
+      "scopes": [
+        "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/youtube.upload"
+      ]
+    }
+  },
+  "analisis": {
+    "_description": "Parámetros de entrada y límites para el flujo de análisis de Shorts.",
+    "default_region": "<REEMPLAZAR: código de región, ej. US>",
+    "max_videos_por_lote": 10,
+    "campos_salida": [
+      "video_id",
+      "titulo",
+      "duracion_segundos",
+      "visualizaciones",
+      "likes",
+      "comentarios",
+      "fecha_publicacion",
+      "canal",
+      "descripcion",
+      "tags"
+    ]
+  },
+  "publicacion": {
+    "_description": "Parámetros para la publicación de Shorts generados. Requiere alcance de subida y consentimiento del canal.",
+    "channel_id": "<REEMPLAZAR: id del canal de destino>",
+    "category_id": "<REEMPLAZAR: id de categoría de YouTube, ej. 22 (Personas y blogs)>",
+    "default_privacy_status": "unlisted",
+    "default_language": "es",
+    "max_duration_seconds": 60,
+    "upload_retries": 3
+  },
+  "formatos": {
+    "_description": "Formatos admitidos para el video resultante.",
+    "video": {
+      "contenedor": "mp4",
+      "codec_video": "h264",
+      "codec_audio": "aac",
+      "resolucion": {
+        "ancho": 1080,
+        "alto": 1920,
+        "_description": "Orientación vertical, formato típico de YouTube Shorts."
+      }
+    },
+    "miniatura": {
+      "contenedor": "jpg",
+      "ancho": 1280,
+      "alto": 720
+    }
+  }
+}
