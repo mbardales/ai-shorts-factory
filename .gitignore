@@ -58,3 +58,10 @@ desktop.ini
 
 # Documentación generada
 docs/generated/
+
+# Salidas generadas por AI Shorts Factory
+output/
+!output/.gitkeep
+
+# Archivos generados por AI Shorts Factory
+output/
