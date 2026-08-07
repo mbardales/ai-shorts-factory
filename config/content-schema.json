@@ -1,0 +1,124 @@
+{
+  "_description": "Esquema de contenido de un Short generado por AI Shorts Factory. Define la estructura mínima de datos que producen los flujos de análisis y generación. Los valores de ejemplo son ilustrativos, no funcionales.",
+  "version": "1.0.0",
+  "tipo": "short",
+  "campos": {
+    "id": {
+      "tipo": "string",
+      "requerido": true,
+      "descripcion": "Identificador único del contenido."
+    },
+    "titulo": {
+      "tipo": "string",
+      "requerido": true,
+      "max_longitud": 100,
+      "descripcion": "Título del Short. Máximo 100 caracteres, límite de YouTube."
+    },
+    "descripcion": {
+      "tipo": "string",
+      "requerido": false,
+      "max_longitud": 5000,
+      "descripcion": "Descripción del video."
+    },
+    "tags": {
+      "tipo": "array",
+      "items": {
+        "tipo": "string"
+      },
+      "max_items": 30,
+      "requerido": false,
+      "descripcion": "Etiquetas del video."
+    },
+    "guion": {
+      "_description": "Guion del contenido en partes.",
+      "tipo": "objeto",
+      "campos": {
+        "gancho": {
+          "tipo": "string",
+          "requerido": true,
+          "descripcion": "Frases iniciales para captar atención."
+        },
+        "desarrollo": {
+          "tipo": "string",
+          "requerido": true,
+          "descripcion": "Cuerpo del contenido."
+        },
+        "llamada_accion": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Llamada a la acción final."
+        }
+      }
+    },
+    "duracion_segundos": {
+      "tipo": "number",
+      "requerido": true,
+      "min": 1,
+      "max": 60,
+      "descripcion": "Duración estimada del Short, dentro del límite de 60 segundos."
+    },
+    "idioma": {
+      "tipo": "string",
+      "requerido": false,
+      "descripcion": "Idioma del contenido."
+    },
+    "activos": {
+      "_description": "Referencias a los activos multimedia utilizados.",
+      "tipo": "objeto",
+      "campos": {
+        "audio": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Ruta o referencia a la pista de audio en assets/audio/."
+        },
+        "musica": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Ruta o referencia a la música en assets/music/."
+        },
+        "branding": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Referencia a elementos de identidad visual en assets/branding/."
+        },
+        "fuentes": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Referencia a tipografías en assets/fonts/."
+        }
+      }
+    },
+    "estado": {
+      "tipo": "string",
+      "requerido": true,
+      "valores_permitidos": [
+        "borrador",
+        "generado",
+        "listo_para_publicar",
+        "publicado"
+      ],
+      "descripcion": "Estado del ciclo de vida del contenido."
+    },
+    "metadatos_analisis": {
+      "_description": "Datos de origen cuando el contenido proviene del flujo de análisis.",
+      "tipo": "objeto",
+      "campos": {
+        "video_origen_id": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Identificador del Short de YouTube analizado."
+        },
+        "fecha_analisis": {
+          "tipo": "string",
+          "requerido": false,
+          "descripcion": "Fecha del análisis, formato AAAA-MM-DD."
+        }
+      }
+    }
+  },
+  "requisitos_adicionales": {
+    "unico": [
+      "id"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "_description": "Registro de proveedores externos utilizados por AI Shorts Factory. Incluye proveedores de IA (LLM) y servicios externos. Los valores secretos se cargan desde variables de entorno, nunca se versionan. Los marcados con 'REEMPLAZAR' deben completarse.",
+  "ai_providers": {
+    "_description": "Proveedores de modelos de lenguaje disponibles. En la fase actual no se ha confirmado el proveedor definitivo.",
+    "default": "<REEMPLAZAR: identificador del proveedor por defecto>",
+    "providers": [
+      {
+        "id": "<REEMPLAZAR: ej. openai>",
+        "name": "<REEMPLAZAR: nombre del proveedor>",
+        "base_url": "<REEMPLAZAR: url base de la API>",
+        "models": [
+          "<REEMPLAZAR: modelo por defecto>"
+        ],
+        "auth": {
+          "_description": "La clave de API no debe almacenarse aquí. Se referencia la variable de entorno correspondiente.",
+          "env_var": "AI_PROVIDER_API_KEY"
+        },
+        "enabled": false,
+        "notes": "<REEMPLAZAR: observaciones sobre el proveedor>"
+      }
+    ]
+  },
+  "youtube_service": {
+    "_description": "Proveedor de acceso a YouTube (YouTube Data API v3). Su configuración específica vive en youtube.json.",
+    "name": "YouTube Data API",
+    "auth": {
+      "env_var": "YOUTUBE_API_KEY"
+    },
+    "enabled": false
+  },
+  "storage": {
+    "_description": "Servicio de almacenamiento previsto para activos y salidas. Su uso se definirá cuando exista stack.",
+    "provider": "<REEMPLAZAR: ej. local, s3, gcs>",
+    "enabled": false
+  }
+}

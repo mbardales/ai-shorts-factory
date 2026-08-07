@@ -1,0 +1,64 @@
+{
+  "_description": "EJEMPLO de configuración de proveedores para AI Shorts Factory. Contiene SOLO placeholders y ejemplos. NO contiene claves reales. Cópiese a providers.json y complétense los valores; los secretos se cargan desde variables de entorno (nunca se versionan).",
+  "ai_providers": {
+    "_description": "Proveedores de modelos de lenguaje. El proveedor por defecto se define en 'default'.",
+    "default": "google",
+    "providers": [
+      {
+        "id": "google",
+        "name": "Google AI Studio (Gemini)",
+        "provider_type": "gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "models": [
+          "gemini-3.6-flash"
+        ],
+        "default_model": "gemini-3.6-flash",
+        "auth": {
+          "_description": "La API Key NO se coloca aquí. Se carga desde la variable de entorno indicada.",
+          "env_var": "GEMINI_API_KEY",
+          "header": "x-goog-api-key"
+        },
+        "enabled": false,
+        "notes": "Ejemplo. Ajustar el modelo a la versión vigente disponible para la cuenta."
+      },
+      {
+        "id": "<REEMPLAZAR: identificador del proveedor>",
+        "name": "<REEMPLAZAR: nombre del proveedor>",
+        "provider_type": "<REEMPLAZAR: tipo de proveedor>",
+        "base_url": "<REEMPLAZAR: url base de la API>",
+        "models": [
+          "<REEMPLAZAR: modelo por defecto>"
+        ],
+        "default_model": "<REEMPLAZAR: modelo por defecto>",
+        "auth": {
+          "env_var": "<REEMPLAZAR: VARIABLE_DE_ENTORNO_SECRETA>"
+        },
+        "enabled": false,
+        "notes": "<REEMPLAZAR: observaciones>"
+      }
+    ]
+  },
+  "youtube_service": {
+    "name": "YouTube Data API",
+    "auth": {
+      "_description": "Ejemplo de referencia a variable de entorno para la clave de YouTube.",
+      "env_var": "YOUTUBE_API_KEY"
+    },
+    "enabled": false
+  },
+  "storage": {
+    "_description": "Servicio de almacenamiento previsto para activos y salidas.",
+    "provider": "<REEMPLAZAR: ej. local, s3, gcs>",
+    "enabled": false
+  },
+  "ejemplo_env": {
+    "_description": "EJEMPLO del archivo .env local. Nunca versionar; NO usar estos valores en producción.",
+    "archivo": ".env",
+    "contenido": [
+      "GEMINI_API_KEY=<TU_API_KEY_AQUI>",
+      "GEMINI_MODEL=gemini-3.6-flash",
+      "GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta",
+      "YOUTUBE_API_KEY=<TU_API_KEY_DE_YOUTUBE_AQUI>"
+    ]
+  }
+}

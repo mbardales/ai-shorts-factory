@@ -1,0 +1,35 @@
+{
+  "_description": "Configuración base del proyecto AI Shorts Factory. Define identidad, fase actual y contexto del MVP. Los valores marcados con la etiqueta 'REEMPLAZAR' deben ser completados por el equipo.",
+  "name": "AI Shorts Factory",
+  "slug": "ai-shorts-factory",
+  "version": "0.1.0",
+  "license": "MIT",
+  "owner": {
+    "_description": "Responsable principal del proyecto.",
+    "name": "<REEMPLAZAR: nombre del responsable>",
+    "contact": "<REEMPLAZAR: correo o medio de contacto>"
+  },
+  "description": "Analizador y generador de YouTube Shorts asistido por modelos de lenguaje.",
+  "current_phase": "definicion",
+  "phases": {
+    "_description": "Fases previstas del proyecto. Coinciden con el roadmap documentado en docs/roadmap/MVP.md.",
+    "definicion": "Documentación inicial, decisiones de arquitectura y configuración base.",
+    "stack": "Elección del lenguaje, framework, dependencias y herramientas de calidad.",
+    "mvp": "Construcción del primer pipeline mínimo (análisis o generación).",
+    "validacion": "Criterios de aceptación del MVP y pruebas.",
+    "post_mvp": "Planificación posterior según backlog."
+  },
+  "mvp": {
+    "_description": "Alcance mínimo viable según docs/roadmap/MVP.md. Solo incluye lo ya definido.",
+    "analisis": "Analizar un Short de YouTube y producir un resultado estructurado.",
+    "generacion": "Generar un Short a partir de una idea simple.",
+    "reproducibilidad": "Proceso reproducible con stack definido y comandos claros."
+  },
+  "architecture_reference": {
+    "_description": "Referencias a los documentos de arquitectura que rigen este proyecto.",
+    "sistema": "docs/architecture/SYSTEM_OVERVIEW.md",
+    "modulos": "docs/architecture/MODULES.md",
+    "flujo_datos": "docs/architecture/DATA_FLOW.md",
+    "decisiones": "docs/decisions/"
+  }
+}
