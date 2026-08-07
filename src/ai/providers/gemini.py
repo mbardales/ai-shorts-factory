@@ -86,7 +86,10 @@ class GeminiProvider(BaseAIProvider):
         Args:
             prompt: texto de entrada. No debe estar vacío.
             **kwargs: sobrescribe parámetros de generación (``temperature``,
-                ``max_output_tokens``, ``top_p``, ``top_k``).
+                ``max_output_tokens``, ``top_p``, ``top_k``) y habilita
+                Structured Output (``response_schema`` con el esquema, dict o
+                ``types.Schema``; si se indica, ``response_mime_type`` se fija
+                a ``"application/json"`` salvo que se pase explícitamente).
 
         Returns:
             :class:`GenerationResult` con el texto generado.
@@ -100,6 +103,9 @@ class GeminiProvider(BaseAIProvider):
         """
         if not prompt or not prompt.strip():
             raise ValueError("El prompt no puede estar vacío.")
+
+        if "response_schema" in kwargs and "response_mime_type" not in kwargs:
+            kwargs = {**kwargs, "response_mime_type": "application/json"}
 
         config = self._build_generation_config(kwargs)
         try:
@@ -126,6 +132,7 @@ class GeminiProvider(BaseAIProvider):
             model=self.model,
             finish_reason=self._extract_finish_reason(response),
             usage=self._extract_usage(response),
+            parsed=getattr(response, "parsed", None),
         )
 
     # ------------------------------------------------------------------
@@ -146,6 +153,8 @@ class GeminiProvider(BaseAIProvider):
             "max_output_tokens": overrides.get(
                 "max_output_tokens", options.max_output_tokens
             ),
+            "response_schema": overrides.get("response_schema"),
+            "response_mime_type": overrides.get("response_mime_type"),
         }
         for key, value in merged.items():
             if value is not None:

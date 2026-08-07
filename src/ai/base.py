@@ -22,12 +22,16 @@ class GenerationResult:
         model: modelo que produjo la respuesta.
         finish_reason: motivo de finalización (si lo reporta el proveedor).
         usage: métricas de uso de tokens (si las reporta el proveedor).
+        parsed: objeto estructurado (dict/list) si el proveedor soporta
+            Structured Output y se indicó ``response_schema``; ``None`` en
+            caso contrario.
     """
 
     text: str
     model: str
     finish_reason: Optional[str] = None
     usage: dict[str, int] = field(default_factory=dict)
+    parsed: Optional[Any] = None
 
 
 @dataclass(frozen=True)

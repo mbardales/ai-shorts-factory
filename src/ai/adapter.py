@@ -143,6 +143,46 @@ class AIAdapter:
         )
         return result.text
 
+    def generate_structured(self, prompt: str, schema: Any, **kwargs: Any) -> Any:
+        """Genera una respuesta estructurada acorde a un esquema JSON.
+
+        Usa Structured Output del proveedor (``response_schema`` + JSON). Si el
+        proveedor o el modelo no lo soportan, devuelve ``None`` y el llamador
+        debe decidir un plan B (p. ej. parsear el texto con un extractor).
+
+        Args:
+            prompt: texto de entrada.
+            schema: JSON Schema (dict) que describe la salida deseada.
+            **kwargs: parámetros de generación adicionales.
+
+        Returns:
+            Objeto estructurado (típicamente un ``dict``) si el proveedor
+            pudo devolverlo; ``None`` en caso contrario.
+
+        Raises:
+            AIError: cualquier error de configuración o del proveedor.
+        """
+        self._logger.info(
+            "Generando respuesta estructurada con proveedor '%s' (modelo '%s').",
+            self._provider.name,
+            self._provider.model,
+        )
+        try:
+            result = self._provider.generate(
+                prompt, response_schema=schema, **kwargs
+            )
+        except AIError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - envolver errores inesperados
+            self._logger.exception("Error no controlado en el proveedor.")
+            raise AIError(f"Error no controlado en el proveedor: {exc}") from exc
+
+        parsed = getattr(result, "parsed", None)
+        self._logger.debug(
+            "Respuesta estructurada: parsed=%s", "sí" if parsed is not None else "no"
+        )
+        return parsed
+
     @classmethod
     def from_config(
         cls,
