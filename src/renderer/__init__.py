@@ -31,6 +31,12 @@ from .base import (
     RenderRequest,
     RenderResult,
 )
+from .commands import (
+    FFmpegCommand,
+    FFmpegInput,
+    FFmpegOutput,
+    build_ffmpeg_command,
+)
 from .exceptions import (
     RendererError,
     RendererExecutionError,
@@ -43,6 +49,10 @@ __all__ = [
     "RenderOptions",
     "RenderRequest",
     "RenderResult",
+    "FFmpegCommand",
+    "FFmpegInput",
+    "FFmpegOutput",
+    "build_ffmpeg_command",
     "RendererError",
     "RendererExecutionError",
     "RendererValidationError",
