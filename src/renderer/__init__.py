@@ -37,6 +37,7 @@ from .commands import (
     FFmpegOutput,
     build_ffmpeg_command,
 )
+from .builder import build_render_request
 from .exceptions import (
     RendererError,
     RendererExecutionError,
@@ -53,6 +54,7 @@ __all__ = [
     "FFmpegInput",
     "FFmpegOutput",
     "build_ffmpeg_command",
+    "build_render_request",
     "RendererError",
     "RendererExecutionError",
     "RendererValidationError",
