@@ -33,6 +33,13 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 #: Directorio donde viven los scripts de cada etapa.
 SCRIPTS_DIR = ROOT / "scripts"
+#: Directorio de los paquetes de src/ (para importar la configuración central).
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from config import load_project_env  # noqa: E402
+
 #: Nombre de la variable de entorno que provee el tema (alternativa al argv).
 PIPELINE_TOPIC_ENV = "PIPELINE_TOPIC"
 
@@ -107,6 +114,7 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    load_project_env()
 
     topic = resolve_topic()
     if not topic:

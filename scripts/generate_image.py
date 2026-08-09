@@ -41,6 +41,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from content import content_package_from_json  # noqa: E402
+from config import load_project_env  # noqa: E402
 from image import (  # noqa: E402
     ImageAdapter,
     ImageScenes,
@@ -60,24 +61,6 @@ OUTPUT_IMAGES_DIR = ROOT / "output" / "images"
 DEFAULT_IMAGE_MODEL = "imagen-3.0-generate-002"
 #: Extensión de las imágenes de salida (formato Imagen, PNG).
 IMAGE_EXTENSION = "png"
-
-
-def load_env_file(path: Path) -> None:
-    """Carga variables ``KEY=VALUE`` de un archivo ``.env`` al entorno.
-
-    No sobrescribe variables ya definidas en el entorno del proceso.
-    """
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
 
 
 def resolve_image_model() -> str:
@@ -112,7 +95,7 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    load_env_file(ROOT / ".env")
+    load_project_env()
 
     try:
         package = load_content_package()

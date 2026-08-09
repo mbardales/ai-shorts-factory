@@ -32,6 +32,7 @@ if str(SRC) not in sys.path:
 
 from ai import AIAdapter, GeminiProvider  # noqa: E402
 from ai.exceptions import AIError  # noqa: E402
+from config import load_project_env  # noqa: E402
 from content import (  # noqa: E402
     CONTENT_PACKAGE_SCHEMA,
     ContentPackage,
@@ -49,24 +50,6 @@ OUTPUT_PATH = ROOT / "output" / "content.json"
 DEFAULT_MODEL = "gemini-3.6-flash"
 #: Máximo de caracteres del título de YouTube.
 MAX_TITLE_LENGTH = 100
-
-
-def load_env_file(path: Path) -> None:
-    """Carga variables ``KEY=VALUE`` de un archivo ``.env`` al entorno.
-
-    No sobrescribe variables ya definidas en el entorno del proceso.
-    """
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
 
 
 def resolve_model() -> str:
@@ -177,7 +160,7 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    load_env_file(ROOT / ".env")
+    load_project_env()
 
     topic = input("Tema:\n").strip()
     if not topic:
