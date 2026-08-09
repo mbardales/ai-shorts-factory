@@ -52,6 +52,8 @@ OUTPUT_AUDIO_DIR = ROOT / "output" / "audio"
 OUTPUT_FILENAME = "narration.mp3"
 #: Modelo TTS por defecto si no hay variable de entorno.
 DEFAULT_TTS_MODEL = "gemini-3.1-flash-tts-preview"
+#: Voz TTS por defecto si no hay variable de entorno.
+DEFAULT_TTS_VOICE = "Kore"
 #: Formato de codificación de la narración de salida.
 AUDIO_FORMAT = AudioFormat.MP3
 
@@ -85,13 +87,13 @@ def resolve_tts_model() -> str:
     return model or DEFAULT_TTS_MODEL
 
 
-def resolve_voice_name() -> Optional[str]:
-    """Devuelve la voz TTS a usar (env ``GEMINI_TTS_VOICE`` o ``None``).
+def resolve_voice_name() -> str:
+    """Devuelve la voz TTS a usar (env ``GEMINI_TTS_VOICE`` o la predeterminada).
 
-    Permite sobrescribir la voz del contenido cuando no es un identificador
-    válido de voz del proveedor.
+    La voz proviene únicamente de la configuración de runtime; ``narration.voice``
+    del contenido no se interpreta como nombre de voz del proveedor.
     """
-    return os.environ.get("GEMINI_TTS_VOICE", "").strip() or None
+    return os.environ.get("GEMINI_TTS_VOICE", "").strip() or DEFAULT_TTS_VOICE
 
 
 def load_content_package() -> "ContentPackage":
@@ -117,13 +119,15 @@ def build_speech_prompt(
 ) -> SpeechPrompt:
     """Construye el :class:`SpeechPrompt` de una porción de narración.
 
-    ``voice`` sobrescribe la voz del contenido si se indica.
+    ``voice`` es el nombre de voz del proveedor a utilizar; si no se indica, se
+    usa la voz predeterminada del script. ``source.voice`` (descripción libre
+    del contenido) no se usa como nombre de voz.
     """
     return SpeechPrompt(
         content_id=content_id,
         source_index=source.index,
         text=source.text,
-        voice=voice or source.voice,
+        voice=voice or DEFAULT_TTS_VOICE,
         timing_seconds=source.timing_seconds,
     )
 
