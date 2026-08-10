@@ -16,6 +16,11 @@ Flujo:
    fallback nunca incluye a ``synthetic`` de forma automática.
 4. Persiste cada imagen en ``output/images/`` con nombres ``scene_001.png``,
    ``scene_002.png``, ... usando :class:`media.LocalStorage`.
+5. Antes de generar, elimina los artifacts de imágenes de ejecuciones
+   anteriores (``scene_*.png`` y ``providers.json``) para que una ejecución
+   parcial o con menos escenas nunca deje PNGs o metadata stale.
+6. Al terminar, escribe ``output/images/providers.json`` (provider/model por
+   PNG) de forma atómica (archivo temporal + ``os.replace``).
 
 Restricción temporal (agosto 2026):
 
@@ -156,6 +161,65 @@ def load_content_package() -> "ContentPackage":
     return content_package_from_json(INPUT_PATH.read_text(encoding="utf-8"))
 
 
+def clean_image_outputs(storage: LocalStorage) -> None:
+    """Elimina artifacts de imágenes de ejecuciones anteriores.
+
+    Borra únicamente los archivos de primer nivel producidos por este script:
+    los PNG de escenas (``scene_*.png``) y el sidecar ``providers.json``. No
+    toca otros archivos ni subdirectorios (incluido su contenido), ni el resto
+    de ``output/``.
+
+    Args:
+        storage: almacén de imágenes (``LocalStorage`` sobre ``output/images``).
+    """
+    for entry in storage.root.iterdir():
+        if not entry.is_file():
+            continue
+        name = entry.name
+        is_scene_png = name.startswith("scene_") and name.endswith(
+            f".{IMAGE_EXTENSION}"
+        )
+        if name == "providers.json" or is_scene_png:
+            try:
+                storage.delete(name)
+            except StorageError as exc:
+                logger.warning(
+                    "No se pudo eliminar el artifact anterior '%s': %s",
+                    name,
+                    exc,
+                )
+
+
+def write_providers_atomic(data: dict, path: Path) -> None:
+    """Escribe la metadata de providers de forma atómica.
+
+    Escribe el contenido completo a un archivo temporal dentro del mismo
+    directorio y lo reemplaza con :func:`os.replace`, de modo que nunca quede
+    un ``providers.json`` parcial. Si falla, elimina el temporal y propaga el
+    error.
+
+    Args:
+        data: dict ``filename -> {"provider": ..., "model": ...}``.
+        path: ruta final de ``providers.json``.
+
+    Raises:
+        OSError: si no se puede escribir o reemplazar el archivo.
+    """
+    tmp = path.with_name(f"{path.name}.tmp")
+    try:
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main() -> int:
     """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
     logging.basicConfig(
@@ -223,6 +287,7 @@ def main() -> int:
     )
 
     storage = LocalStorage(OUTPUT_IMAGES_DIR, auto_create=True)
+    clean_image_outputs(storage)
     providers: dict[str, dict[str, Optional[str]]] = {}
     for number, visual in enumerate(visual_prompts, start=1):
         filename = f"scene_{number:03d}.{IMAGE_EXTENSION}"
@@ -244,10 +309,7 @@ def main() -> int:
 
     providers_path = OUTPUT_IMAGES_DIR / "providers.json"
     try:
-        providers_path.write_text(
-            json.dumps(providers, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        write_providers_atomic(providers, providers_path)
     except OSError as exc:
         logger.error("Error al escribir la metadata de providers: %s", exc)
         return 1
