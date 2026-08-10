@@ -35,10 +35,12 @@ Uso:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 # --- Ajuste del path para poder importar los paquetes de src/ ----------------
 ROOT = Path(__file__).resolve().parents[1]
@@ -221,6 +223,7 @@ def main() -> int:
     )
 
     storage = LocalStorage(OUTPUT_IMAGES_DIR, auto_create=True)
+    providers: dict[str, dict[str, Optional[str]]] = {}
     for number, visual in enumerate(visual_prompts, start=1):
         filename = f"scene_{number:03d}.{IMAGE_EXTENSION}"
         logger.info("Generando escena %d/%d...", number, total)
@@ -233,7 +236,22 @@ def main() -> int:
         except StorageError as exc:
             logger.error("Error al guardar la imagen de la escena %d: %s", number, exc)
             return 1
+        providers[filename] = {
+            "provider": getattr(result, "provider", None),
+            "model": result.model,
+        }
         logger.info("Imagen guardada: %s", path)
+
+    providers_path = OUTPUT_IMAGES_DIR / "providers.json"
+    try:
+        providers_path.write_text(
+            json.dumps(providers, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.error("Error al escribir la metadata de providers: %s", exc)
+        return 1
+    logger.info("Metadata de providers guardada: %s", providers_path)
     return 0
 
 

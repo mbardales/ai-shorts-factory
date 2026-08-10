@@ -70,12 +70,17 @@ class ImageResult:
         content: bytes de la imagen generada.
         metadata: metadatos técnicos de la imagen (de Media Core).
         model: modelo que produjo la imagen.
+        provider: nombre corto y estable del proveedor que produjo la imagen
+            (ej. ``"gemini-image"``, ``"stability-image"``,
+            ``"synthetic-image"``). Opcional y ``None`` por defecto para no
+            romper la compatibilidad con consumidores existentes.
     """
 
     prompt: str
     content: bytes
     metadata: ImageMetadata
     model: str
+    provider: Optional[str] = None
 
 
 @dataclass(frozen=True)

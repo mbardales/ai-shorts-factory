@@ -21,9 +21,11 @@ Uso:
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any, Mapping
 
 # --- Ajuste del path para poder importar los paquetes de src/ ----------------
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +62,46 @@ OUTPUT_PATH = OUTPUT_DIR / "project.json"
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 #: Extensiones de audio reconocidas (el pipeline genera ``.mp3``).
 AUDIO_EXTENSIONS = {"mp3", "wav", "ogg", "m4a"}
+
+
+def load_image_providers(path: Path) -> dict[str, dict[str, str]]:
+    """Carga la metadata opcional provider/model por imagen.
+
+    El sidecar es **opcional**: si no existe o no es interpretable, se
+    devuelve un mapa vacío y los activos se construyen con ``provider=None``
+    y ``model=None`` (compatible con ejecuciones anteriores).
+
+    Args:
+        path: ruta al sidecar ``providers.json`` (o equivalente).
+
+    Returns:
+        Dict ``filename -> {"provider": ..., "model": ...}`` con solo valores
+        de tipo cadena; nunca secretos.
+    """
+    if not path.is_file():
+        logger.info("No se encontró metadata de providers: %s", path)
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        logger.warning("No se pudo leer la metadata de providers (%s): %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("La metadata de providers no es un objeto: %s", path)
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for filename, entry in data.items():
+        if not isinstance(filename, str) or not isinstance(entry, Mapping):
+            continue
+        clean: dict[str, str] = {}
+        provider = entry.get("provider")
+        model = entry.get("model")
+        if isinstance(provider, str):
+            clean["provider"] = provider
+        if isinstance(model, str):
+            clean["model"] = model
+        result[filename] = clean
+    return result
 
 
 def detect_assets(directory: Path, extensions: set[str]) -> list[str]:
@@ -105,12 +147,14 @@ def main() -> int:
 
     image_paths = detect_assets(IMAGES_DIR, IMAGE_EXTENSIONS)
     audio_paths = detect_assets(AUDIO_DIR, AUDIO_EXTENSIONS)
+    image_providers = load_image_providers(IMAGES_DIR / "providers.json")
 
     manifest = build_project_manifest(
         content_package_to_dict(package),
         image_paths,
         audio_paths,
         content_file="content.json",
+        image_providers=image_providers,
     )
 
     try:

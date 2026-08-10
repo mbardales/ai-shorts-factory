@@ -78,6 +78,9 @@ class ProjectAsset:
         scene_index: índice (0-based) de la escena a la que pertenece un
             activo de imagen; ``None`` para audio.
         extension: extensión del archivo sin punto (opcional).
+        provider: nombre del proveedor que generó la imagen
+            (ej. ``"gemini-image"``); ``None`` si no se conoce o es audio.
+        model: modelo que generó la imagen (opcional).
     """
 
     kind: AssetKind
@@ -85,6 +88,8 @@ class ProjectAsset:
     path: str
     scene_index: Optional[int] = None
     extension: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +158,7 @@ def build_project_manifest(
     content_file: str = "content.json",
     output_file: Optional[str] = None,
     estimated_duration_seconds: Optional[float] = None,
+    image_providers: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> ProjectManifest:
     """Construye un :class:`ProjectManifest` a partir de los insumos del pipeline.
 
@@ -168,6 +174,10 @@ def build_project_manifest(
             si se omite, se deriva como ``video/<content_id>.mp4``.
         estimated_duration_seconds: duración estimada en segundos; si se
             omite, se calcula sumando la temporización de las escenas.
+        image_providers: metadata opcional de trazabilidad por imagen, claveada
+            por nombre de archivo (ej. ``"scene_001.png"``) y con las claves
+            ``provider``/``model``. Si una imagen no está en el mapa, su
+            metadata queda en ``None``.
 
     Returns:
         Manifest completo con la identidad heredada del contenido.
@@ -184,6 +194,19 @@ def build_project_manifest(
         created_at=str(identity_data.get("created_at") or now),
     )
 
+    image_meta = image_providers if isinstance(image_providers, Mapping) else {}
+
+    def _image_meta(name: str) -> tuple[Optional[str], Optional[str]]:
+        entry = image_meta.get(name)
+        if not isinstance(entry, Mapping):
+            return None, None
+        provider = entry.get("provider")
+        model = entry.get("model")
+        return (
+            str(provider) if provider is not None else None,
+            str(model) if model is not None else None,
+        )
+
     ordered_images = sorted({str(path) for path in image_paths})
     assets = tuple(
         ProjectAsset(
@@ -192,6 +215,8 @@ def build_project_manifest(
             path=path,
             scene_index=index,
             extension=Path(path).suffix.lstrip(".") or None,
+            provider=_image_meta(Path(path).name)[0],
+            model=_image_meta(Path(path).name)[1],
         )
         for index, path in enumerate(ordered_images)
     ) + tuple(

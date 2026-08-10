@@ -176,6 +176,8 @@ def _coerce_asset(data: Any) -> ProjectAsset:
         path=_as_str(data.get("path")),
         scene_index=_as_optional_int(data.get("scene_index")),
         extension=_as_optional_str(data.get("extension")),
+        provider=_as_optional_str(data.get("provider")),
+        model=_as_optional_str(data.get("model")),
     )
 
 

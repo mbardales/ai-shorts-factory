@@ -141,6 +141,7 @@ class GeminiImageProvider(ImageProvider):
             content=content,
             metadata=metadata,
             model=self.model,
+            provider=self.name,
         )
 
     def store(

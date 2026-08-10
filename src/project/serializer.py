@@ -46,6 +46,8 @@ def _asset_to_dict(asset: Any) -> dict[str, Any]:
         "path": asset.path,
         "scene_index": asset.scene_index,
         "extension": asset.extension,
+        "provider": asset.provider,
+        "model": asset.model,
     }
 
 
