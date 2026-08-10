@@ -32,6 +32,9 @@ DEFAULT_VIDEO_CODEC = "libx264"
 #: Formato de píxeles por defecto de la salida (compatible con H.264/MP4).
 DEFAULT_PIX_FMT = "yuv420p"
 
+#: Códec de audio por defecto cuando la composición incluye pistas de audio.
+DEFAULT_AUDIO_CODEC = "aac"
+
 
 @dataclass(frozen=True)
 class FFmpegInput:
@@ -142,6 +145,7 @@ def _build_composed_arguments(
     *,
     durations: Sequence[Optional[float]],
     fps: int,
+    audio_codec: Optional[str] = None,
 ) -> list[str]:
     """Construye los argumentos de un comando FFmpeg con composición de imágenes.
 
@@ -150,15 +154,22 @@ def _build_composed_arguments(
     ``filter_complex`` + ``concat``. Las entradas sin duración (p. ej. audio)
     se conservan como inputs simples.
 
+    Si existen entradas sin duración (pistas de audio), se mapean como salida
+    adicional usando su índice real de input, se codifican con
+    ``audio_codec`` (o ``DEFAULT_AUDIO_CODEC``) y se recorta la salida con
+    ``-shortest`` para sincronizarla con el video.
+
     Returns:
         Lista de argumentos previa a la salida (sin incluir ``-f``/ruta).
     """
     arguments: list[str] = []
     input_index = 0
     filter_labels: list[str] = []
+    audio_indices: list[int] = []
     for item, duration in zip(inputs, durations):
         if duration is None:
             arguments.extend(("-i", str(item.path)))
+            audio_indices.append(input_index)
             input_index += 1
             continue
         arguments.extend(
@@ -191,6 +202,11 @@ def _build_composed_arguments(
             str(fps),
         )
     )
+    if audio_indices:
+        for audio_index in audio_indices:
+            arguments.extend(("-map", f"{audio_index}:a"))
+        arguments.extend(("-c:a", audio_codec or DEFAULT_AUDIO_CODEC))
+        arguments.extend(("-shortest",))
     return arguments
 
 
@@ -202,6 +218,7 @@ def build_ffmpeg_command(
     executable: str = "ffmpeg",
     durations: Optional[Sequence[Optional[float]]] = None,
     fps: Optional[int] = None,
+    audio_codec: Optional[str] = None,
 ) -> FFmpegCommand:
     """Construye un :class:`FFmpegCommand` de forma determinista.
 
@@ -217,7 +234,10 @@ def build_ffmpeg_command(
     resultantes se concatenan en el orden de ``inputs`` mediante
     ``filter_complex`` + ``concat``. Los valores ``None`` en ``durations`` se
     interpretan como entradas sin composición (se pasan como inputs simples,
-    útiles para pistas de audio).
+    útiles para pistas de audio). Si existen esas pistas, se mapean al output
+    (``-map <idx>:a`` usando su índice real de input), se codifican con
+    ``audio_codec`` (o ``DEFAULT_AUDIO_CODEC``) y la salida se sincroniza con
+    ``-shortest``.
 
     Args:
         inputs: entradas del comando, en orden.
@@ -228,6 +248,8 @@ def build_ffmpeg_command(
         durations: duración en segundos por entrada (opcional). Si se
             proporciona, activa la composición de imágenes con ``concat``.
         fps: fotogramas por segundo de la composición (por defecto 25).
+        audio_codec: códec de audio de salida (por defecto
+            ``DEFAULT_AUDIO_CODEC``) cuando hay pistas de audio.
 
     Returns:
         :class:`FFmpegCommand` con los argumentos construidos.
@@ -271,6 +293,7 @@ def build_ffmpeg_command(
                 inputs,
                 durations=durations,  # type: ignore[arg-type]
                 fps=resolved_fps,
+                audio_codec=audio_codec,
             )
         )
     else:

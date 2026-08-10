@@ -143,6 +143,7 @@ def build_project_ffmpeg_command(
 
     options_obj = request.options
     fps = getattr(options_obj, "fps", None)
+    audio_codec = getattr(options_obj, "audio_codec", None)
 
     return build_ffmpeg_command(
         inputs=ffmpeg_inputs,
@@ -151,4 +152,5 @@ def build_project_ffmpeg_command(
         executable=executable,
         durations=durations or None,
         fps=fps,
+        audio_codec=audio_codec,
     )
