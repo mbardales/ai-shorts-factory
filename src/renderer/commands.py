@@ -19,9 +19,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .exceptions import RendererValidationError
+
+#: Fotogramas por segundo por defecto para la composición de imágenes.
+DEFAULT_FPS = 25
+
+#: Códec de video por defecto para la salida compuesta.
+DEFAULT_VIDEO_CODEC = "libx264"
+
+#: Formato de píxeles por defecto de la salida (compatible con H.264/MP4).
+DEFAULT_PIX_FMT = "yuv420p"
 
 
 @dataclass(frozen=True)
@@ -121,12 +130,78 @@ def _validate_command_args(
     return errors
 
 
+def _format_duration(value: float) -> str:
+    """Formatea una duración en segundos como cadena FFmpeg."""
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
+def _build_composed_arguments(
+    inputs: Sequence[FFmpegInput],
+    *,
+    durations: Sequence[Optional[float]],
+    fps: int,
+) -> list[str]:
+    """Construye los argumentos de un comando FFmpeg con composición de imágenes.
+
+    Cada entrada con duración se convierte en un segmento de video con
+    ``-loop 1 -t <dur>`` y todos los segmentos se concatenan en orden mediante
+    ``filter_complex`` + ``concat``. Las entradas sin duración (p. ej. audio)
+    se conservan como inputs simples.
+
+    Returns:
+        Lista de argumentos previa a la salida (sin incluir ``-f``/ruta).
+    """
+    arguments: list[str] = []
+    input_index = 0
+    filter_labels: list[str] = []
+    for item, duration in zip(inputs, durations):
+        if duration is None:
+            arguments.extend(("-i", str(item.path)))
+            input_index += 1
+            continue
+        arguments.extend(
+            (
+                "-loop",
+                "1",
+                "-framerate",
+                str(fps),
+                "-t",
+                _format_duration(float(duration)),
+                "-i",
+                str(item.path),
+            )
+        )
+        filter_labels.append(f"[{input_index}:v]")
+        input_index += 1
+
+    concat_inputs = "".join(filter_labels)
+    arguments.extend(
+        (
+            "-filter_complex",
+            f"{concat_inputs}concat=n={len(filter_labels)}:v=1:a=0[outv]",
+            "-map",
+            "[outv]",
+            "-c:v",
+            DEFAULT_VIDEO_CODEC,
+            "-pix_fmt",
+            DEFAULT_PIX_FMT,
+            "-r",
+            str(fps),
+        )
+    )
+    return arguments
+
+
 def build_ffmpeg_command(
     *,
     inputs: Sequence[FFmpegInput],
     output: FFmpegOutput,
     options: Sequence[str] = (),
     executable: str = "ffmpeg",
+    durations: Optional[Sequence[Optional[float]]] = None,
+    fps: Optional[int] = None,
 ) -> FFmpegCommand:
     """Construye un :class:`FFmpegCommand` de forma determinista.
 
@@ -135,12 +210,24 @@ def build_ffmpeg_command(
     inmediatamente antes de la ruta. No añade argumentos que el consumidor no
     haya solicitado.
 
+    Composición de imágenes (opcional):
+
+    Si ``durations`` es una secuencia de la misma longitud que ``inputs``, cada
+    imagen se repite durante su duración (``-loop 1 -t <dur>``) y los segmentos
+    resultantes se concatenan en el orden de ``inputs`` mediante
+    ``filter_complex`` + ``concat``. Los valores ``None`` en ``durations`` se
+    interpretan como entradas sin composición (se pasan como inputs simples,
+    útiles para pistas de audio).
+
     Args:
         inputs: entradas del comando, en orden.
         output: salida del comando.
         options: opciones adicionales (tras el ejecutable, antes de las
             entradas).
         executable: binario de FFmpeg (por defecto ``"ffmpeg"``).
+        durations: duración en segundos por entrada (opcional). Si se
+            proporciona, activa la composición de imágenes con ``concat``.
+        fps: fotogramas por segundo de la composición (por defecto 25).
 
     Returns:
         :class:`FFmpegCommand` con los argumentos construidos.
@@ -150,12 +237,45 @@ def build_ffmpeg_command(
             válido.
     """
     errors = _validate_command_args(inputs, output, options, executable)
+    if durations is not None:
+        if not isinstance(durations, Sequence) or isinstance(durations, (str, bytes)):
+            errors.append("'durations' debe ser una secuencia.")
+        elif len(durations) != len(inputs):
+            errors.append(
+                "'durations' debe tener la misma longitud que 'inputs' "
+                f"({len(durations)} != {len(inputs)})."
+            )
+        else:
+            for index, duration in enumerate(durations):
+                if duration is None:
+                    continue
+                if not isinstance(duration, (int, float)) or isinstance(duration, bool):
+                    errors.append(
+                        f"La duración en la posición {index} no es un número."
+                    )
+                elif duration <= 0:
+                    errors.append(
+                        f"La duración en la posición {index} debe ser positiva."
+                    )
     if errors:
         raise RendererValidationError("; ".join(errors))
 
+    compose = durations is not None and any(d is not None for d in durations)
+    resolved_fps = fps if fps is not None else DEFAULT_FPS
+
     arguments: list[str] = []
-    arguments.extend(options)
-    for item in inputs:
-        arguments.extend(("-i", str(item.path)))
+    if compose:
+        arguments.extend(options)
+        arguments.extend(
+            _build_composed_arguments(
+                inputs,
+                durations=durations,  # type: ignore[arg-type]
+                fps=resolved_fps,
+            )
+        )
+    else:
+        arguments.extend(options)
+        for item in inputs:
+            arguments.extend(("-i", str(item.path)))
     arguments.extend(("-f", output.format, str(output.path)))
     return FFmpegCommand(executable=executable, arguments=tuple(arguments))

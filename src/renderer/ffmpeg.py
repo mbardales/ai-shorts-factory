@@ -39,6 +39,38 @@ def _is_valid_asset_path(path: Any) -> bool:
     return bool(str(value).strip()) and bool(value.name)
 
 
+def _scene_duration(manifest: ProjectManifest, scene_index: Optional[int]) -> Optional[float]:
+    """Devuelve la duración en segundos de la escena ``scene_index``.
+
+    La temporización se obtiene del ContentPackage embebido en el manifest
+    (``visuals.scenes[i].timing_seconds``), que es la fuente de verdad de las
+    duraciones de cada escena.
+
+    Args:
+        manifest: manifest del proyecto.
+        scene_index: índice (0-based) de la escena; ``None`` si no aplica.
+
+    Returns:
+        Duración en segundos o ``None`` si no se puede determinar.
+    """
+    if scene_index is None:
+        return None
+    content = getattr(manifest, "content", None)
+    if not isinstance(content, dict):
+        return None
+    visuals = content.get("visuals")
+    scenes = visuals.get("scenes") if isinstance(visuals, dict) else None
+    if not isinstance(scenes, (list, tuple)):
+        return None
+    if not (0 <= scene_index < len(scenes)):
+        return None
+    scene = scenes[scene_index]
+    timing = scene.get("timing_seconds") if isinstance(scene, dict) else None
+    if not isinstance(timing, (int, float)) or isinstance(timing, bool) or timing <= 0:
+        return None
+    return float(timing)
+
+
 def build_project_ffmpeg_command(
     request: RenderRequest,
     *,
@@ -86,6 +118,7 @@ def build_project_ffmpeg_command(
         resolved_format = request.format.value
 
     ffmpeg_inputs: list[FFmpegInput] = []
+    durations: list[Optional[float]] = []
     assets = manifest.assets if isinstance(manifest, ProjectManifest) else None
     if assets is None or isinstance(assets, (str, bytes)) or not isinstance(assets, Sequence):
         errors.append("'manifest.assets' debe ser una colección de ProjectAsset.")
@@ -100,13 +133,22 @@ def build_project_ffmpeg_command(
                 errors.append(f"El asset en la posición {index} no tiene una ruta válida.")
                 continue
             ffmpeg_inputs.append(FFmpegInput(path=Path(asset.path)))
+            if asset.kind == AssetKind.IMAGE:
+                durations.append(_scene_duration(manifest, asset.scene_index))
+            else:
+                durations.append(None)
 
     if errors:
         raise RendererValidationError("; ".join(errors))
+
+    options_obj = request.options
+    fps = getattr(options_obj, "fps", None)
 
     return build_ffmpeg_command(
         inputs=ffmpeg_inputs,
         output=FFmpegOutput(path=output_path, format=resolved_format),
         options=options,
         executable=executable,
+        durations=durations or None,
+        fps=fps,
     )
