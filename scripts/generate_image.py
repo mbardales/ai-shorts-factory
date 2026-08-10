@@ -7,7 +7,9 @@ Flujo:
 2. Obtiene todas las escenas del contenido y construye un prompt visual por
    escena con :func:`image.build_scene_prompts`.
 3. Genera una imagen por escena mediante el :class:`image.ImageAdapter`
-   envuelto sobre :class:`image.GeminiImageProvider`.
+   envuelto sobre el proveedor seleccionado con la variable de entorno
+   ``GEMINI_IMAGE_PROVIDER`` (``gemini`` por defecto, ``stability`` o
+   ``synthetic``).
 4. Persiste cada imagen en ``output/images/`` con nombres ``scene_001.png``,
    ``scene_002.png``, ... usando :class:`media.LocalStorage`.
 
@@ -44,11 +46,16 @@ from content import content_package_from_json  # noqa: E402
 from config import load_project_env  # noqa: E402
 from image import (  # noqa: E402
     ImageAdapter,
+    ImageProvider,
     ImageScenes,
     build_scene_prompts,
 )
-from image.exceptions import ImageError  # noqa: E402
-from image.providers import GeminiImageProvider  # noqa: E402
+from image.exceptions import ImageError, ImageProviderError  # noqa: E402
+from image.providers import (  # noqa: E402
+    GeminiImageProvider,
+    StabilityImageProvider,
+    SyntheticImageProvider,
+)
 from media import LocalStorage, StorageError  # noqa: E402
 
 logger = logging.getLogger("generate_image")
@@ -59,6 +66,10 @@ INPUT_PATH = ROOT / "output" / "content.json"
 OUTPUT_IMAGES_DIR = ROOT / "output" / "images"
 #: Modelo de Imagen por defecto si no hay variable de entorno.
 DEFAULT_IMAGE_MODEL = "imagen-3.0-generate-002"
+#: Proveedor de imágenes por defecto si no hay variable de entorno.
+DEFAULT_IMAGE_PROVIDER = "gemini"
+#: Valores admitidos para ``GEMINI_IMAGE_PROVIDER``.
+SUPPORTED_IMAGE_PROVIDERS = ("gemini", "stability", "synthetic")
 #: Extensión de las imágenes de salida (formato Imagen, PNG).
 IMAGE_EXTENSION = "png"
 
@@ -72,6 +83,42 @@ def resolve_image_model() -> str:
     if model.startswith("models/"):
         model = model[len("models/") :]
     return model or DEFAULT_IMAGE_MODEL
+
+
+def resolve_image_provider() -> str:
+    """Devuelve el proveedor de imágenes a usar (env o el predeterminado).
+
+    Lee ``GEMINI_IMAGE_PROVIDER``, lo normaliza a minúsculas y usa
+    ``DEFAULT_IMAGE_PROVIDER`` si no está configurada.
+    """
+    provider = os.environ.get("GEMINI_IMAGE_PROVIDER", "").strip().lower()
+    return provider or DEFAULT_IMAGE_PROVIDER
+
+
+def build_image_provider() -> ImageProvider:
+    """Construye el proveedor de imágenes según ``GEMINI_IMAGE_PROVIDER``.
+
+    Selecciona entre los proveedores disponibles:
+
+    - ``gemini``: :class:`GeminiImageProvider` con el modelo resuelto.
+    - ``stability``: :class:`StabilityImageProvider` con el modelo resuelto.
+    - ``synthetic``: :class:`SyntheticImageProvider` (sin modelo externo).
+
+    Raises:
+        ImageProviderError: si ``GEMINI_IMAGE_PROVIDER`` no es un valor
+            soportado. No se realiza ninguna llamada externa en ese caso.
+    """
+    provider = resolve_image_provider()
+    if provider == "gemini":
+        return GeminiImageProvider(model=resolve_image_model())
+    if provider == "stability":
+        return StabilityImageProvider(model=resolve_image_model())
+    if provider == "synthetic":
+        return SyntheticImageProvider()
+    raise ImageProviderError(
+        f"Proveedor de imágenes no soportado: {provider!r}. "
+        f"Valores válidos: {', '.join(SUPPORTED_IMAGE_PROVIDERS)}."
+    )
 
 
 def load_content_package() -> "ContentPackage":
@@ -116,7 +163,7 @@ def main() -> int:
     )
 
     try:
-        adapter = ImageAdapter(GeminiImageProvider(model=resolve_image_model()))
+        adapter = ImageAdapter(build_image_provider())
     except ImageError as exc:
         logger.error("Error al configurar el proveedor de imágenes: %s", exc)
         return 1
