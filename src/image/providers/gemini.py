@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional, Type
 
 from ..base import ImageOptions, ImageProvider, ImageRequest, ImageResult
-from ..exceptions import ImageGenerationError, ImageProviderError
+from ..exceptions import ImageErrorCode, ImageGenerationError, ImageProviderError
 from media import ImageMetadata, MediaKind
 from media.paths import build_asset_rel_path, sanitize_component
 from media.storage import LocalStorage
@@ -128,8 +128,10 @@ class GeminiImageProvider(ImageProvider):
             raise self._map_client_error(exc) from exc
         except Exception as exc:  # noqa: BLE001 - envolver errores inesperados
             self._logger.exception("Error inesperado al llamar a Gemini Images.")
+            error_code = self._classify_unexpected(exc)
             raise ImageProviderError(
-                f"Error inesperado al llamar a Gemini Images: {exc}"
+                f"Error inesperado al llamar a Gemini Images: {exc}",
+                error_code=error_code,
             ) from exc
 
         content, mime_type = self._extract_image(response)
@@ -227,8 +229,39 @@ class GeminiImageProvider(ImageProvider):
         else:
             causa = "del API"
         return ImageProviderError(
-            f"Error {causa} de Gemini Images (HTTP {code}): {message}"
+            f"Error {causa} de Gemini Images (HTTP {code}): {message}",
+            error_code=self._classify_http_code(code),
         )
+
+    @staticmethod
+    def _classify_http_code(code: Optional[int]) -> ImageErrorCode:
+        """Clasifica un código HTTP en :class:`ImageErrorCode` (``UNKNOWN`` si no aplica)."""
+        if code == 400:
+            return ImageErrorCode.BAD_REQUEST
+        if code == 401:
+            return ImageErrorCode.AUTH
+        if code == 403:
+            return ImageErrorCode.PERMISSION
+        if code == 404:
+            return ImageErrorCode.MODEL_NOT_FOUND
+        if code == 429:
+            return ImageErrorCode.RATE_LIMIT
+        if code is not None and 500 <= code < 600:
+            return ImageErrorCode.SERVER_ERROR
+        return ImageErrorCode.UNKNOWN
+
+    @staticmethod
+    def _classify_unexpected(exc: Exception) -> ImageErrorCode:
+        """Clasifica una excepción no controlada (timeout/red) en un código mínimo.
+
+        Solo distingue las causas de red y timeout de forma genérica (tipos del
+        stdlib); el resto se considera ``UNEXPECTED``.
+        """
+        if isinstance(exc, TimeoutError):
+            return ImageErrorCode.TIMEOUT
+        if isinstance(exc, ConnectionError):
+            return ImageErrorCode.NETWORK
+        return ImageErrorCode.UNEXPECTED
 
     def _extract_image(self, response: Any) -> tuple[bytes, str]:
         """Extrae los bytes y el tipo MIME de la primera imagen generada.
@@ -240,21 +273,29 @@ class GeminiImageProvider(ImageProvider):
         generated_images = getattr(response, "generated_images", None) or []
         if not generated_images:
             raise ImageGenerationError(
-                "Gemini Images no devolvió imágenes en la respuesta."
+                "Gemini Images no devolvió imágenes en la respuesta.",
+                error_code=ImageErrorCode.EMPTY_RESPONSE,
             )
         generated = generated_images[0]
         filtered_reason = getattr(generated, "rai_filtered_reason", None)
         if filtered_reason:
             raise ImageGenerationError(
                 f"La imagen fue filtrada por políticas de seguridad: "
-                f"{filtered_reason}"
+                f"{filtered_reason}",
+                error_code=ImageErrorCode.FILTERED,
             )
         image = getattr(generated, "image", None)
         if image is None:
-            raise ImageGenerationError("La respuesta no contiene una imagen.")
+            raise ImageGenerationError(
+                "La respuesta no contiene una imagen.",
+                error_code=ImageErrorCode.INVALID_RESPONSE,
+            )
         content = getattr(image, "image_bytes", None)
         if not content:
-            raise ImageGenerationError("La imagen generada no contiene bytes.")
+            raise ImageGenerationError(
+                "La imagen generada no contiene bytes.",
+                error_code=ImageErrorCode.EMPTY_RESPONSE,
+            )
         mime_type = getattr(image, "mime_type", None) or "image/png"
         return content, mime_type
 

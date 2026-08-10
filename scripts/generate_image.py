@@ -9,7 +9,11 @@ Flujo:
 3. Genera una imagen por escena mediante el :class:`image.ImageAdapter`
    envuelto sobre el proveedor seleccionado con la variable de entorno
    ``GEMINI_IMAGE_PROVIDER`` (``gemini`` por defecto, ``stability`` o
-   ``synthetic``).
+   ``synthetic``). Opcionalmente, si ``GEMINI_IMAGE_FALLBACK_PROVIDER`` define
+   un proveedor distinto, se habilita UN fallback POR EJECUCIÓN: si el primario
+   falla con un error recuperable (429, timeout, red, 5xx, respuesta vacía), el
+   resto de escenas (incluida la fallida) se generan con el fallback. El
+   fallback nunca incluye a ``synthetic`` de forma automática.
 4. Persiste cada imagen en ``output/images/`` con nombres ``scene_001.png``,
    ``scene_002.png``, ... usando :class:`media.LocalStorage`.
 
@@ -51,6 +55,7 @@ from image import (  # noqa: E402
     build_scene_prompts,
 )
 from image.exceptions import ImageError, ImageProviderError  # noqa: E402
+from image.fallback import make_generate_with_fallback  # noqa: E402
 from image.providers import (  # noqa: E402
     GeminiImageProvider,
     StabilityImageProvider,
@@ -95,20 +100,33 @@ def resolve_image_provider() -> str:
     return provider or DEFAULT_IMAGE_PROVIDER
 
 
-def build_image_provider() -> ImageProvider:
-    """Construye el proveedor de imágenes según ``GEMINI_IMAGE_PROVIDER``.
+def resolve_image_fallback_provider() -> str:
+    """Devuelve el proveedor de fallback configurado (env) o cadena vacía.
 
-    Selecciona entre los proveedores disponibles:
+    Lee ``GEMINI_IMAGE_FALLBACK_PROVIDER`` y lo normaliza a minúsculas. Una
+    cadena vacía significa "fallback deshabilitado". El valor, si existe, debe
+    ser uno de :data:`SUPPORTED_IMAGE_PROVIDERS` (se valida al construirlo).
+    """
+    return os.environ.get("GEMINI_IMAGE_FALLBACK_PROVIDER", "").strip().lower()
 
-    - ``gemini``: :class:`GeminiImageProvider` con el modelo resuelto.
-    - ``stability``: :class:`StabilityImageProvider` con el modelo resuelto.
-    - ``synthetic``: :class:`SyntheticImageProvider` (sin modelo externo).
+
+def build_image_provider(provider: str | None = None) -> ImageProvider:
+    """Construye el proveedor de imágenes según el nombre indicado.
+
+    Args:
+        provider: nombre del proveedor (``gemini``, ``stability`` o
+            ``synthetic``). Si es ``None`` se usa el resuelto por
+            :func:`resolve_image_provider`.
+
+    Returns:
+        Instancia concreta del proveedor seleccionado.
 
     Raises:
-        ImageProviderError: si ``GEMINI_IMAGE_PROVIDER`` no es un valor
-            soportado. No se realiza ninguna llamada externa en ese caso.
+        ImageProviderError: si el nombre no es un valor soportado, o si el
+            proveedor requiere configuración inválida (p. ej. API key ausente).
+            No se realiza ninguna llamada externa en ese caso.
     """
-    provider = resolve_image_provider()
+    provider = (provider or resolve_image_provider())
     if provider == "gemini":
         return GeminiImageProvider(model=resolve_image_model())
     if provider == "stability":
@@ -162,18 +180,52 @@ def main() -> int:
         total,
     )
 
+    primary_name = resolve_image_provider()
     try:
-        adapter = ImageAdapter(build_image_provider())
+        primary = ImageAdapter(build_image_provider(primary_name))
     except ImageError as exc:
         logger.error("Error al configurar el proveedor de imágenes: %s", exc)
         return 1
+
+    fallback = None
+    fallback_name = resolve_image_fallback_provider()
+    if primary_name == "synthetic":
+        if fallback_name:
+            logger.info(
+                "Provider primario sintético (explícito): no se aplica el "
+                "fallback configurado ('%s').",
+                fallback_name,
+            )
+    elif fallback_name:
+        if fallback_name == primary_name:
+            logger.warning(
+                "El provider de fallback ('%s') es igual al primario; "
+                "el fallback se ignora.",
+                fallback_name,
+            )
+        else:
+            try:
+                fallback = ImageAdapter(build_image_provider(fallback_name))
+                logger.info("Fallback configurado: '%s'.", fallback.provider.name)
+            except ImageError as exc:
+                logger.error(
+                    "Error al configurar el proveedor de fallback: %s", exc
+                )
+                return 1
+
+    generate_with_fallback = make_generate_with_fallback(primary, fallback)
+    logger.info(
+        "Provider primario: '%s' (modelo '%s').",
+        primary.provider.name,
+        primary.provider.model,
+    )
 
     storage = LocalStorage(OUTPUT_IMAGES_DIR, auto_create=True)
     for number, visual in enumerate(visual_prompts, start=1):
         filename = f"scene_{number:03d}.{IMAGE_EXTENSION}"
         logger.info("Generando escena %d/%d...", number, total)
         try:
-            result = adapter.generate(visual.to_request())
+            result = generate_with_fallback(visual.to_request())
             path = storage.write_bytes(filename, result.content)
         except ImageError as exc:
             logger.error("Error al generar la imagen de la escena %d: %s", number, exc)

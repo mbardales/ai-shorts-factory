@@ -23,7 +23,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from ..base import ImageOptions, ImageProvider, ImageRequest, ImageResult
-from ..exceptions import ImageGenerationError, ImageProviderError
+from ..exceptions import ImageErrorCode, ImageGenerationError, ImageProviderError
 from media import ImageMetadata
 from media.paths import sanitize_component
 
@@ -146,22 +146,26 @@ class StabilityImageProvider(ImageProvider):
             )
             raise ImageProviderError(
                 f"Tiempo de espera agotado al llamar a Stability AI "
-                f"(HTTP timeout {self.timeout:.0f}s)."
+                f"(HTTP timeout {self.timeout:.0f}s).",
+                error_code=ImageErrorCode.TIMEOUT,
             ) from exc
         except urllib_error.URLError as exc:
             self._logger.warning("Error de red al llamar a Stability AI: %s", exc.reason)
             raise ImageProviderError(
-                f"Error de red al llamar a Stability AI: {exc.reason}"
+                f"Error de red al llamar a Stability AI: {exc.reason}",
+                error_code=ImageErrorCode.NETWORK,
             ) from exc
         except Exception as exc:  # noqa: BLE001 - envolver errores inesperados
             self._logger.exception("Error inesperado al llamar a Stability AI.")
             raise ImageProviderError(
-                f"Error inesperado al llamar a Stability AI: {exc}"
+                f"Error inesperado al llamar a Stability AI: {exc}",
+                error_code=ImageErrorCode.UNEXPECTED,
             ) from exc
 
         if not content:
             raise ImageGenerationError(
-                "Stability AI no devolvió bytes de imagen (HTTP 200 vacío)."
+                "Stability AI no devolvió bytes de imagen (HTTP 200 vacío).",
+                error_code=ImageErrorCode.EMPTY_RESPONSE,
             )
         mime_type = self._normalize_mime_type(content_type)
         metadata = self._build_metadata(request, content, mime_type)
@@ -236,17 +240,29 @@ class StabilityImageProvider(ImageProvider):
         )
         if code == 401:
             causa = "de autenticación (HTTP 401)"
+            error_code = ImageErrorCode.AUTH
         elif code == 403:
             causa = "de permiso (HTTP 403)"
+            error_code = ImageErrorCode.PERMISSION
+        elif code == 404:
+            causa = f"del API (HTTP {code})"
+            error_code = ImageErrorCode.MODEL_NOT_FOUND
         elif code in (400, 422):
             causa = f"de solicitud (HTTP {code})"
+            error_code = ImageErrorCode.BAD_REQUEST
         elif code == 429:
             causa = "de cuota o límite de solicitudes (HTTP 429)"
+            error_code = ImageErrorCode.RATE_LIMIT
         elif code is not None and 500 <= code < 600:
             causa = f"del servicio (HTTP {code})"
+            error_code = ImageErrorCode.SERVER_ERROR
         else:
             causa = f"del API (HTTP {code})"
-        return ImageProviderError(f"Error {causa} de Stability AI: {message}")
+            error_code = ImageErrorCode.UNKNOWN
+        return ImageProviderError(
+            f"Error {causa} de Stability AI: {message}",
+            error_code=error_code,
+        )
 
     @staticmethod
     def _safe_error_message(exc: urllib_error.HTTPError, *, limit: int = 500) -> str:
