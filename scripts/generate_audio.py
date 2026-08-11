@@ -6,10 +6,15 @@ Flujo:
    con el dominio existente (``content_package_from_json``).
 2. Obtiene la narración del contenido y construye el
    :class:`audio.SpeechPrompt` correspondiente.
-3. Genera la pista mediante el :class:`audio.AudioAdapter` envuelto sobre
-   :class:`audio.GoogleTTSProvider`.
-4. Persiste la pista en ``output/audio/narration.mp3`` usando
-   :class:`media.LocalStorage`.
+3. Genera la pista mediante el :class:`audio.AudioAdapter` envuelto sobre el
+   proveedor seleccionado con la variable de entorno ``GEMINI_AUDIO_PROVIDER``
+   (``gemini`` por defecto o ``synthetic``).
+4. Persiste la pista en ``output/audio/`` (``narration.mp3`` para Gemini,
+   ``narration.wav`` para synthetic) usando :class:`media.LocalStorage`.
+
+El proveedor ``synthetic`` genera un WAV PCM determinista offline (sin API key
+ni red), útil para validar el pipeline completo cuando el TTS externo no está
+disponible.
 
 Uso:
 
@@ -36,11 +41,12 @@ from audio import (  # noqa: E402
     AudioAdapter,
     AudioFormat,
     AudioNarration,
+    AudioProvider,
     NarrationSource,
     SpeechPrompt,
 )
-from audio.exceptions import AudioError  # noqa: E402
-from audio.providers import GoogleTTSProvider  # noqa: E402
+from audio.exceptions import AudioError, AudioProviderError  # noqa: E402
+from audio.providers import GoogleTTSProvider, SyntheticAudioProvider  # noqa: E402
 from media import LocalStorage, StorageError  # noqa: E402
 
 logger = logging.getLogger("generate_audio")
@@ -49,14 +55,22 @@ logger = logging.getLogger("generate_audio")
 INPUT_PATH = ROOT / "output" / "content.json"
 #: Directorio donde se guarda la pista de narración.
 OUTPUT_AUDIO_DIR = ROOT / "output" / "audio"
-#: Nombre del archivo de salida de la narración.
+#: Nombre del archivo de salida de la narración (Gemini).
 OUTPUT_FILENAME = "narration.mp3"
+#: Nombre del archivo de salida de la narración (synthetic).
+SYNTHETIC_OUTPUT_FILENAME = "narration.wav"
+#: Proveedor de audio por defecto si no hay variable de entorno.
+DEFAULT_AUDIO_PROVIDER = "gemini"
+#: Valores admitidos para ``GEMINI_AUDIO_PROVIDER``.
+SUPPORTED_AUDIO_PROVIDERS = ("gemini", "synthetic")
 #: Modelo TTS por defecto si no hay variable de entorno.
 DEFAULT_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 #: Voz TTS por defecto si no hay variable de entorno.
 DEFAULT_TTS_VOICE = "Kore"
-#: Formato de codificación de la narración de salida.
+#: Formato de codificación de la narración de salida (Gemini).
 AUDIO_FORMAT = AudioFormat.MP3
+#: Formato de codificación de la narración de salida (synthetic).
+SYNTHETIC_AUDIO_FORMAT = AudioFormat.WAV
 
 
 def resolve_tts_model() -> str:
@@ -77,6 +91,65 @@ def resolve_voice_name() -> str:
     del contenido no se interpreta como nombre de voz del proveedor.
     """
     return os.environ.get("GEMINI_TTS_VOICE", "").strip() or DEFAULT_TTS_VOICE
+
+
+def resolve_audio_provider() -> str:
+    """Devuelve el proveedor de audio a usar (env o el predeterminado).
+
+    Lee ``GEMINI_AUDIO_PROVIDER``, lo normaliza a minúsculas y usa
+    ``DEFAULT_AUDIO_PROVIDER`` si no está configurada.
+    """
+    provider = os.environ.get("GEMINI_AUDIO_PROVIDER", "").strip().lower()
+    return provider or DEFAULT_AUDIO_PROVIDER
+
+
+def build_audio_provider(provider: str | None = None) -> AudioProvider:
+    """Construye el proveedor de audio según el nombre indicado.
+
+    Args:
+        provider: nombre del proveedor (``gemini`` o ``synthetic``). Si es
+            ``None`` se usa el resuelto por :func:`resolve_audio_provider`.
+
+    Returns:
+        Instancia concreta del proveedor seleccionado.
+
+    Raises:
+        AudioProviderError: si el nombre no es un valor soportado, o si el
+            proveedor requiere configuración inválida (p. ej. API key ausente).
+            No se realiza ninguna llamada externa en ese caso.
+    """
+    provider = provider or resolve_audio_provider()
+    if provider == "gemini":
+        return GoogleTTSProvider(model=resolve_tts_model())
+    if provider == "synthetic":
+        return SyntheticAudioProvider()
+    raise AudioProviderError(
+        f"Proveedor de audio no soportado: {provider!r}. "
+        f"Valores válidos: {', '.join(SUPPORTED_AUDIO_PROVIDERS)}."
+    )
+
+
+def clean_alternate_narration(storage: LocalStorage, keep: str) -> None:
+    """Elimina el audio de narración de la otra vía si quedó stale.
+
+    Evita que un ``narration.mp3`` (Gemini) o ``narration.wav`` (synthetic) de
+    una ejecución anterior entre en el manifest como activo duplicado. Solo
+    toca los dos nombres de narración conocidos; no toca el resto de
+    ``output/audio``.
+    """
+    for candidate in (OUTPUT_FILENAME, SYNTHETIC_OUTPUT_FILENAME):
+        if candidate == keep:
+            continue
+        if storage.exists(candidate):
+            try:
+                storage.delete(candidate)
+                logger.info(
+                    "Eliminado audio stale de ejecución anterior: %s", candidate
+                )
+            except StorageError as exc:
+                logger.warning(
+                    "No se pudo eliminar el audio stale '%s': %s", candidate, exc
+                )
 
 
 def load_content_package() -> "ContentPackage":
@@ -141,17 +214,23 @@ def main() -> int:
         len(prompt.text),
     )
 
+    provider_name = resolve_audio_provider()
     try:
-        adapter = AudioAdapter(GoogleTTSProvider(model=resolve_tts_model()))
+        adapter = AudioAdapter(build_audio_provider(provider_name))
     except AudioError as exc:
         logger.error("Error al configurar el proveedor de TTS: %s", exc)
         return 1
 
+    is_synthetic = provider_name == "synthetic"
+    audio_format = SYNTHETIC_AUDIO_FORMAT if is_synthetic else AUDIO_FORMAT
+    filename = SYNTHETIC_OUTPUT_FILENAME if is_synthetic else OUTPUT_FILENAME
+
     storage = LocalStorage(OUTPUT_AUDIO_DIR, auto_create=True)
-    logger.info("Generando narración...")
+    clean_alternate_narration(storage, keep=filename)
+    logger.info("Generando narración (proveedor '%s')...", adapter.provider.name)
     try:
-        result = adapter.generate(prompt.to_request(format=AUDIO_FORMAT))
-        path = storage.write_bytes(OUTPUT_FILENAME, result.content)
+        result = adapter.generate(prompt.to_request(format=audio_format))
+        path = storage.write_bytes(filename, result.content)
     except AudioError as exc:
         logger.error("Error al generar la narración: %s", exc)
         return 1
