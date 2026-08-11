@@ -2,71 +2,157 @@
 
 ## Propósito
 
-Describir las áreas (módulos previstos) del proyecto **AI Shorts Factory** tal como están codificadas en la estructura de directorios del repositorio. Su objetivo es que quien trabaje en el proyecto sepa dónde debe ubicar cada tipo de contenido o código nuevo.
+Describir los módulos reales del proyecto **AI Shorts Factory**: su
+responsabilidad, componentes, estado y dependencias. Su objetivo es que quien
+trabaje en el proyecto sepa dónde vive cada funcionalidad y dónde ubicar código
+nuevo. **Refleja el estado del código en la rama `feature/project-manifest`.**
 
 ## Estado
 
-- **Etapa:** Esquema de directorios definido; sin contenido ni código en los módulos.
-- **Última actualización:** 2026-08-06.
+- **Etapa:** Implementación — pipeline de generación funcional end-to-end.
+- **Última actualización:** 2026-08-11.
 
-## Descripción
+## Estructura de `src/`
 
-El proyecto aún no tiene código. La siguiente tabla describe el **rol previsto** de cada directorio, según el esqueleto creado en el commit `chore: initialize project structure`.
+### `src/config`
 
-### `prompts/`
+Carga centralizada del entorno.
 
-Contenido destinado a modelos de lenguaje (LLM):
-
-| Subdirectorio | Rol previsto |
+| Componente | Rol |
 |---|---|
-| `chains/` | Secuencias de prompts encadenados (pasos múltiples) |
-| `system/` | Prompts de sistema / instrucciones base |
-| `templates/` | Plantillas de prompts reutilizables |
-| `user/` | Prompts del usuario / entradas |
+| `config.py` (carga de `.env`) | `load_project_env()` resuelve el `.env` raíz desde la ruta del módulo (no desde CWD) |
 
-### `workflows/`
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** — (usado por todos los providers).
 
-Orquestación de los procesos del sistema:
+### `src/content`
 
-| Subdirectorio | Rol previsto |
+Dominio puro del "Content Package": lo que un Short debe decir.
+
+| Componente | Rol |
 |---|---|
-| `core/` | Workflows principales del sistema |
-| `shared/` | Pasos o utilidades compartidas entre workflows |
-| `templates/` | Plantillas de workflows |
-| `testing/` | Workflows y material para pruebas |
+| `ContentPackage` (agregado) | Contenido completo: identity, research, seo, script, visuals, narration, status |
+| `validator` + `CONTENT_PACKAGE_SCHEMA` | Validación estructural del contenido |
+| `exceptions.py` | Jerarquía de excepciones del dominio |
 
-### `assets/`
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** ninguna (dominio puro; no depende de AI/infra).
 
-Activos multimedia:
+### `src/prompt_engine`
 
-| Subdirectorio | Rol previsto |
+Composición de prompts para el LLM.
+
+| Componente | Rol |
 |---|---|
-| `audio/` | Pistas de audio |
-| `music/` | Música |
-| `branding/` | Imágenes e identidad visual |
-| `fonts/` | Tipografías |
+| `builder.build_prompt(topic, ...)` | Compone plantilla + schema JSON + reglas |
+| `templates` (`PROMPT_TEMPLATE`, `JSON_SCHEMA`, `RULES`) | Materiales del prompt |
 
-### `config/`
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `json`/`typing` (nada del dominio; no depende de `ai`).
 
-Configuración de la aplicación (aún vacío; sin archivos).
+### `src/ai`
 
-### `docs/`
+Abstracción de proveedores LLM.
 
-Documentación del proyecto:
-
-| Subdirectorio | Rol previsto |
+| Componente | Rol |
 |---|---|
-| `architecture/` | Vistas de arquitectura y diseño |
-| `decisions/` | Registro de decisiones de arquitectura (ADR) |
-| `guides/` | Guías de desarrollo y operación |
-| `roadmap/` | Planificación (MVP, backlog) |
+| `providers/gemini.py` | Provider Gemini (texto) |
+| `adapter.py` | Contrato/adaptador entre provider y dominio |
 
-### `scripts/`, `examples/`, `backups/`, `logs/`
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `content`, `config`.
 
-- `scripts/` — utilidades y automatización.
-- `examples/` — ejemplos de uso.
-- `backups/` — respaldos.
-- `logs/` — registros (logs) de ejecución.
+### `src/media`
+
+Infraestructura compartida para activos de medios.
+
+| Componente | Rol |
+|---|---|
+| `storage.py` | Persistencia/lectura de activos |
+| `metadata.py`, `paths.py` | Metadatos y rutas canónicas de activos |
+| `exceptions.py` | Excepciones de la capa |
+
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `config`.
+
+### `src/image`
+
+Generación de imágenes de escena.
+
+| Componente | Rol |
+|---|---|
+| `providers/gemini.py` | Provider Imagen de Gemini |
+| `providers/stability.py` | Provider Stability |
+| `providers/synthetic.py` | Provider sintético determinista (offline) |
+| `adaptador` | Contrato + dispatch/fallback |
+| `exceptions.py` | Excepciones |
+
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `media`, `config`.
+- Nota: fallback controlado (máx. uno por run); `synthetic` solo explícito.
+
+### `src/audio`
+
+Generación de narración.
+
+| Componente | Rol |
+|---|---|
+| `providers/gemini.py` | Provider TTS de Gemini |
+| `providers/synthetic.py` | Provider sintético (WAV PCM offline) |
+| `adaptador` | Contrato + dispatch |
+| `exceptions.py` | Excepciones |
+
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `media`, `config`.
+- Nota: `AudioResult` expone `text`, `content`, `metadata`, `model` (sin campo
+  `provider`). Sin fallback de audio.
+
+### `src/project`
+
+Project Manifest: agregado que representa el proyecto a renderizar.
+
+| Componente | Rol |
+|---|---|
+| `ProjectManifest` (agregado) | Activos detectados + contenido + metadatos |
+| `serializer`, `validator` | (De)serialización y validación de `project.json` |
+| `exceptions.py` | Excepciones |
+
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `content`, `media`.
+
+### `src/renderer`
+
+Render FFmpeg: el manifest es la única fuente de verdad.
+
+| Componente | Rol |
+|---|---|
+| `ffmpeg.py` | Builder de comandos FFmpeg |
+| `commands.py` | Adaptador manifest → comandos/request |
+| `executor` | Ejecución vía subprocess (ffmpeg/ffprobe) |
+
+- **Estado:** IMPLEMENTADO.
+- **Dependencias:** `project`, `media`.
+- Nota: requiere FFmpeg + ffprobe en el PATH.
+
+### `src/video`
+
+Abstracción planeada de composición de video (Timeline, VideoAdapter).
+
+- **Estado:** PENDIENTE — esqueleto planeado, **no cableado al pipeline**
+  (nada lo importa).
+- **Dependencias:** —.
+
+## Directorios de apoyo
+
+| Directorio | Rol | Estado |
+|---|---|---|
+| `scripts/` | Etapas del pipeline (`generate_content`, `generate_image`, `generate_audio`, `generate_manifest`, `render_video`, `run_pipeline`, `test_gemini`) | IMPLEMENTADO |
+| `config/` | Configuración base: `project.json`, `providers.json`, `providers.example.json`, `settings.json`, `youtube.json`, `content-schema.json` | Parcial (algunos archivos desactualizados vs. implementación) |
+| `prompts/`, `workflows/` | Scaffolding previsto de contenido LLM y orquestación | VACÍO (sin código) |
+| `output/` | Salidas de cada etapa del pipeline | Generado (gitignored) |
+
+Nota: `src/prompt_engine` sustituye funcionalmente al scaffolding de
+`prompts/`; la orquestación vive hoy en `scripts/` (a la espera de `workflows/`).
 
 ## Secciones principales
 
@@ -75,8 +161,8 @@ Documentación del proyecto:
 
 ## Pendientes (TODO)
 
-- [ ] Decidir qué directorios se convierten en módulos de código reales y cuáles permanecen como contenido/configuración.
-- [ ] Definir la arquitectura interna de cada módulo (una vez exista código).
-- [ ] Definir la dependencia entre `prompts/` y `workflows/` (quién consume qué).
-- [ ] Añadir ejemplos iniciales en `examples/` para validar la estructura.
-- [ ] Actualizar este documento conforme los módulos se implementen.
+- [ ] Implementar análisis de Shorts (nuevo dominio + providers).
+- [ ] Materializar orquestación en `workflows/` (hoy en `scripts/`).
+- [ ] Cablear o descartar `src/video`.
+- [ ] Añadir pruebas y tooling de calidad por módulo.
+- [ ] Mantener este documento alineado con el código.

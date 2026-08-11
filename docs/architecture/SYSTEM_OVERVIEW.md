@@ -2,50 +2,120 @@
 
 ## Propósito
 
-Documentar la visión general del sistema **AI Shorts Factory**: su objetivo, alcance, componentes previstos y la relación entre las principales áreas del repositorio. Sirve como punto de entrada para cualquier persona (o agente) que necesite comprender el proyecto antes de trabajar en él.
+Documentar la visión general del sistema **AI Shorts Factory**: su objetivo,
+alcance, componentes implementados y la relación entre los principales paquetes
+de `src/`. Sirve como punto de entrada para cualquier persona (o agente) que
+necesite comprender el proyecto antes de trabajar en él.
 
 ## Estado
 
-- **Etapa:** Inicial / planificación.
-- **Código:** No existe código fuente, dependencias, ni sistema de build. El repositorio contiene únicamente el esqueleto de directorios (archivos `.gitkeep`).
-- **Última actualización:** 2026-08-06.
+- **Etapa:** Implementación — pipeline de generación funcional end-to-end.
+- **Código:** pipeline completo implementado en `src/` + `scripts/`.
+- **Última actualización:** 2026-08-11.
 
 ## Descripción
 
-El proyecto se define en el `README.md` como un **analizador y generador de YouTube Shorts**:
+El proyecto (ver `README.md`) es un **generador de YouTube Shorts asistido por
+IA**. El flujo de **generación** está implementado: un tema se convierte en un
+Short completo (contenido, imágenes, narración, manifest y video renderizado).
+El flujo de **análisis** de Shorts existentes sigue pendiente.
 
-- **Análisis:** estudiar videos cortos de YouTube (YouTube Shorts).
-- **Generación:** producir contenido corto de forma automatizada o asistida.
+La arquitectura separa **dominio puro** (sin dependencias de IA/infra) de
+**infraestructura** reutilizable, y mantiene cada generador de activos como una
+capa con sus propios providers y su adaptador.
 
-En esta fase, el objetivo del sistema está definido conceptualmente, pero **no hay funcionalidades implementadas**. La estructura de directorios del repositorio codifica la arquitectura prevista:
+## Arquitectura en capas
 
-| Área | Directorio | Rol previsto |
+```
+          Scripts (orquestación del pipeline)
+                       │
+   ┌───────────────────┼────────────────────┐
+   │  Content Package  │  Project Manifest  │   ← dominio puro
+   │    (src/content)  │    (src/project)   │
+   └───────┬───────────┴─────────┬──────────┘
+           │                     │
+   ┌───────┴───────┐   ┌─────────┴─────────┐
+   │ prompt_engine │   │      media        │   ← infraestructura compartida
+   │   (prompts)   │   │  (storage, paths) │
+   └───────┬───────┘   └───────────────────┘
+           │
+   ┌───────┴───────┐  ┌───────────┐  ┌───────────┐
+   │   ai (LLM)    │  │ image     │  │ audio     │   ← proveedores + adaptador
+   └───────────────┘  └───────────┘  └───────────┘
+                                                      │
+                                        ┌─────────────┘
+                                        │
+                                        └──► renderer (FFmpeg) ──► output/video/
+```
+
+## Componentes implementados
+
+| Paquete | Responsabilidad | Depende de |
 |---|---|---|
-| Contenido para modelos de lenguaje | `prompts/` | Instrucciones y plantillas de prompts para LLM |
-| Orquestación | `workflows/` | Secuencias de pasos que componen los procesos |
-| Activos multimedia | `assets/` | Audio, música, branding, tipografías |
-| Configuración | `config/` | Configuración de la aplicación |
-| Documentación | `docs/` | Arquitectura, decisiones, guías, roadmap |
-| Soporte | `scripts/`, `examples/`, `backups/`, `logs/` | Utilidades, ejemplos, respaldos y registros |
+| `src/config` | Carga centralizada del `.env` | — |
+| `src/content` | Modelo de dominio Content Package (agregado, validator, schema) | — (dominio puro) |
+| `src/prompt_engine` | Composición de prompts para el LLM | `templates` (interno) |
+| `src/ai` | Abstracción LLM (Gemini provider + adapter) | `content`, `config` |
+| `src/media` | Storage/metadata/paths de activos | `config` |
+| `src/image` | Generación de imágenes (providers + adaptador + fallback) | `media`, `config` |
+| `src/audio` | Generación de narración (providers + adaptador) | `media`, `config` |
+| `src/project` | Project Manifest (agregado, serializer, validator) | `content`, `media` |
+| `src/renderer` | Builder y ejecutor de comandos FFmpeg | `project`, `media` |
 
-> **Nota:** ninguna de estas áreas contiene código ni contenido todavía. Las descripciones expresan la intención de diseño, no funcionalidad existente.
+## Flujo de datos del pipeline
+
+```
+generate_content.py
+   tema ──► prompt_engine.build_prompt ──► ai (Gemini) ──► output/content.json
+generate_image.py
+   content.json ──► image providers ──► output/images/scene_*.png + providers.json
+generate_audio.py
+   content.json ──► audio providers   ──► output/audio/narration.mp3 | narration.wav
+generate_manifest.py
+   detecta activos ──► output/project.json   (fuente de verdad del render)
+render_video.py
+   project.json ──► renderer (FFmpeg) ──► output/video/*.mp4
+```
+
+Detalle del flujo de datos previsto y ampliado: [DATA_FLOW.md](DATA_FLOW.md).
+
+## Providers
+
+| Área | Providers | Selección |
+|---|---|---|
+| Texto | `gemini` | `GEMINI_MODEL` |
+| Imágenes | `gemini`, `stability`, `synthetic` | `GEMINI_IMAGE_PROVIDER`; fallback `GEMINI_IMAGE_FALLBACK_PROVIDER` |
+| Audio | `gemini`, `synthetic` | `GEMINI_AUDIO_PROVIDER` |
+
+El pipeline completo es ejecutable **offline** con los providers `synthetic`
+(imagen + audio) + FFmpeg, sin API keys ni HTTP.
+
+## Principios de diseño
+
+- **Dominio puro:** `content` y `project` no conocen proveedores ni formato
+  de activos; no dependen de IA/infra.
+- **Adaptadores:** cada generador (`ai`, `image`, `audio`) define un contrato
+  (protocolo/Adaptador) e implementa uno o más providers.
+- **Provenance:** los activos registran el provider/model que los generó
+  (`providers.json`).
+- **Manifest único de render:** `output/project.json`.
+- **Fallback controlado:** máximo un fallback por run; el proveedor
+  `synthetic` nunca se activa automáticamente.
 
 ## Secciones principales
 
-- [Módulos previstos](MODULES.md) — desglose por área del repositorio.
-- [Flujo de datos](DATA_FLOW.md) — recorrido de datos entre las áreas del sistema.
+- [Módulos](MODULES.md) — desglose por paquete de `src/`.
+- [Flujo de datos](DATA_FLOW.md) — recorrido de datos.
 - [Guía de desarrollo](guides/DEVELOPMENT_GUIDE.md) — convenciones y entorno.
 - [Guía de Git](guides/GIT_WORKFLOW.md) — flujo de trabajo con el repositorio.
 - [Roadmap](roadmap/MVP.md) y [Backlog](roadmap/BACKLOG.md) — plan de trabajo.
-- [ADR-001](decisions/ADR-001-Architecture.md) — decisiones de arquitectura registradas.
+- [ADR-001](decisions/ADR-001-Architecture.md) — decisiones de arquitectura.
 - [Estado del proyecto](PROJECT_STATE.md) — estado actual consolidado.
 
 ## Pendientes (TODO)
 
-- [ ] Definir el lenguaje de programación y el sistema de build.
-- [ ] Definir las dependencias y el entorno de ejecución.
-- [ ] Concretar el alcance funcional del analizador de Shorts.
-- [ ] Concretar el alcance funcional del generador de Shorts.
-- [ ] Confirmar los proveedores de IA / modelos LLM a utilizar.
-- [ ] Detallar los límites entre `prompts/`, `workflows/` y `config/`.
-- [ ] Actualizar este documento cuando exista código fuente.
+- [ ] Definir el alcance funcional del analizador de Shorts.
+- [ ] Confirmar el rol final de `workflows/` en la orquestación.
+- [ ] Cablear o descartar `src/video`.
+- [ ] Completar herramientas de calidad (lint/typecheck/tests).
+- [ ] Mantener este documento alineado con el código.
