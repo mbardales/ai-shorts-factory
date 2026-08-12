@@ -152,19 +152,22 @@ def clean_alternate_narration(storage: LocalStorage, keep: str) -> None:
                 )
 
 
-def load_content_package() -> "ContentPackage":
-    """Lee y reconstruye el ContentPackage desde ``output/content.json``.
+def load_content_package(content_path: Path) -> "ContentPackage":
+    """Lee y reconstruye el ContentPackage desde ``content_path``.
+
+    Args:
+        content_path: ruta absoluta del ``content.json`` de entrada.
 
     Raises:
         FileNotFoundError: si el archivo de entrada no existe.
         ValueError: si el JSON no se puede reconstruir como ContentPackage.
     """
-    if not INPUT_PATH.is_file():
+    if not content_path.is_file():
         raise FileNotFoundError(
-            f"No se encontró {INPUT_PATH}. "
+            f"No se encontró {content_path}. "
             "Ejecuta primero 'python scripts/generate_content.py'."
         )
-    return content_package_from_json(INPUT_PATH.read_text(encoding="utf-8"))
+    return content_package_from_json(content_path.read_text(encoding="utf-8"))
 
 
 def build_speech_prompt(
@@ -188,16 +191,19 @@ def build_speech_prompt(
     )
 
 
-def main() -> int:
-    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    load_project_env()
+def generate_audio_to_path(content_path: Path, audio_dir: Path) -> int:
+    """Genera la narración y la persiste en ``audio_dir``.
 
+    Es la función interna reutilizable del script: recibe rutas explícitas de
+    entrada y salida (permite al PipelineRunner escribir en un run aislado).
+    Devuelve 0 en éxito y 1 en error.
+
+    Args:
+        content_path: ruta absoluta del ``content.json`` de entrada.
+        audio_dir: directorio absoluto donde se guarda la narración.
+    """
     try:
-        package = load_content_package()
+        package = load_content_package(content_path)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("%s", exc)
         return 1
@@ -225,7 +231,7 @@ def main() -> int:
     audio_format = SYNTHETIC_AUDIO_FORMAT if is_synthetic else AUDIO_FORMAT
     filename = SYNTHETIC_OUTPUT_FILENAME if is_synthetic else OUTPUT_FILENAME
 
-    storage = LocalStorage(OUTPUT_AUDIO_DIR, auto_create=True)
+    storage = LocalStorage(audio_dir, auto_create=True)
     clean_alternate_narration(storage, keep=filename)
     logger.info("Generando narración (proveedor '%s')...", adapter.provider.name)
     try:
@@ -239,6 +245,16 @@ def main() -> int:
         return 1
     logger.info("Narración guardada: %s", path)
     return 0
+
+
+def main() -> int:
+    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    load_project_env()
+    return generate_audio_to_path(INPUT_PATH, OUTPUT_AUDIO_DIR)
 
 
 if __name__ == "__main__":

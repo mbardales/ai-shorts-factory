@@ -52,13 +52,20 @@ def _asset_to_dict(asset: Any) -> dict[str, Any]:
 
 
 def _metadata_to_dict(metadata: Any) -> dict[str, Any]:
-    """Convierte un :class:`ProjectMetadata` a dict."""
-    return {
+    """Convierte un :class:`ProjectMetadata` a dict.
+
+    ``run_id`` solo se incluye cuando no es ``None`` para mantener la salida
+    retrocompatible con manifest legacy (que no declaraban ejecución).
+    """
+    result: dict[str, Any] = {
         "schema_version": metadata.schema_version,
         "created_at": metadata.created_at,
         "updated_at": metadata.updated_at,
         "content_file": metadata.content_file,
     }
+    if metadata.run_id is not None:
+        result["run_id"] = metadata.run_id
+    return result
 
 
 def project_manifest_to_dict(manifest: ProjectManifest) -> dict[str, Any]:

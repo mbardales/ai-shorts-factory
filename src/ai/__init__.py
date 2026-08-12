@@ -32,7 +32,7 @@ from .exceptions import (
     RateLimitError,
 )
 from .adapter import AIAdapter, ProviderSettings
-from .providers import GeminiProvider
+from .providers import GeminiProvider, SyntheticContentProvider
 
 __all__ = [
     "AIAdapter",
@@ -41,6 +41,7 @@ __all__ = [
     "GenerationOptions",
     "GenerationResult",
     "GeminiProvider",
+    "SyntheticContentProvider",
     "AIError",
     "APIError",
     "AuthenticationError",

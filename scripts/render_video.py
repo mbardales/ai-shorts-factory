@@ -186,10 +186,20 @@ def describe_output(path: Path) -> None:
     logger.info("Duración real: %.2f s", duration)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Punto de entrada del script. Devuelve un código de salida documentado."""
-    args = build_parser().parse_args(argv)
-    manifest_path = Path(args.manifest_path)
+def render_video_to_path(manifest_path: Path) -> int:
+    """Renderiza el video de un proyecto desde la ruta de su manifest.
+
+    Es la función interna reutilizable del script: recibe la ruta del manifest
+    de forma explícita (permite al PipelineRunner renderizar un run aislado).
+    Las rutas de los activos y de salida se interpretan relativas al directorio
+    del manifest. Devuelve un código de salida documentado.
+
+    Args:
+        manifest_path: ruta absoluta del ``project.json`` a renderizar.
+
+    Returns:
+        Código de salida (ver :data:`render_video.EXIT_OK` y siguientes).
+    """
     base_dir = manifest_path.resolve().parent
 
     logger.info("Manifest: %s", manifest_path)
@@ -271,6 +281,12 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Duración reportada: %.1f s", result.duration_seconds)
     describe_output(output_abs)
     return EXIT_OK
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Punto de entrada del script. Devuelve un código de salida documentado."""
+    args = build_parser().parse_args(argv)
+    return render_video_to_path(Path(args.manifest_path))
 
 
 if __name__ == "__main__":

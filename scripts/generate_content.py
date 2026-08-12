@@ -30,8 +30,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from ai import AIAdapter, GeminiProvider  # noqa: E402
-from ai.exceptions import AIError  # noqa: E402
+from ai import AIAdapter, GeminiProvider, SyntheticContentProvider  # noqa: E402
+from ai.exceptions import AIError, ConfigurationError  # noqa: E402
 from config import load_project_env  # noqa: E402
 from content import (  # noqa: E402
     CONTENT_PACKAGE_SCHEMA,
@@ -50,6 +50,44 @@ OUTPUT_PATH = ROOT / "output" / "content.json"
 DEFAULT_MODEL = "gemini-3.6-flash"
 #: Máximo de caracteres del título de YouTube.
 MAX_TITLE_LENGTH = 100
+#: Proveedor de contenido por defecto si no hay variable de entorno.
+DEFAULT_CONTENT_PROVIDER = "gemini"
+#: Valores admitidos para ``GEMINI_CONTENT_PROVIDER``.
+SUPPORTED_CONTENT_PROVIDERS = ("gemini", "synthetic")
+
+
+def resolve_content_provider() -> str:
+    """Devuelve el proveedor de contenido a usar (env o el predeterminado).
+
+    Lee ``GEMINI_CONTENT_PROVIDER``, lo normaliza a minúsculas y usa
+    ``DEFAULT_CONTENT_PROVIDER`` si no está configurada.
+    """
+    provider = os.environ.get("GEMINI_CONTENT_PROVIDER", "").strip().lower()
+    return provider or DEFAULT_CONTENT_PROVIDER
+
+
+def build_content_provider(provider: str | None = None) -> AIAdapter:
+    """Construye el adaptador de contenido según el proveedor indicado.
+
+    Args:
+        provider: nombre del proveedor (``gemini`` o ``synthetic``). Si es
+            ``None`` se usa el resuelto por :func:`resolve_content_provider`.
+
+    Returns:
+        :class:`AIAdapter` con el proveedor seleccionado.
+
+    Raises:
+        ConfigurationError: si el nombre no es un valor soportado.
+    """
+    provider = provider or resolve_content_provider()
+    if provider == "gemini":
+        return AIAdapter(GeminiProvider(model=resolve_model()))
+    if provider == "synthetic":
+        return AIAdapter(SyntheticContentProvider())
+    raise ConfigurationError(
+        f"Proveedor de contenido no soportado: {provider!r}. "
+        f"Valores válidos: {', '.join(SUPPORTED_CONTENT_PROVIDERS)}."
+    )
 
 
 def resolve_model() -> str:
@@ -84,29 +122,37 @@ def clamp_title(title: str) -> str:
     return title[: MAX_TITLE_LENGTH - 3].rstrip() + "..."
 
 
-def ensure_identity(raw: dict[str, Any], topic: str) -> dict[str, Any]:
+def ensure_identity(
+    raw: dict[str, Any], topic: str, *, project_id: str | None = None
+) -> dict[str, Any]:
     """Garantiza identidad con ``id`` y ``title`` (usa el tema como respaldo).
 
-    El resto de objetos de valor los completa el validator robusto.
+    Si ``project_id`` se indica, fuerza el ``identity.id`` (útil para runs
+    reproducibles). El resto de objetos de valor los completa el validator
+    robusto.
     """
     identity = raw.get("identity") if isinstance(raw.get("identity"), dict) else {}
     normalized = dict(raw)
     normalized["identity"] = {
-        "id": str(identity.get("id") or uuid.uuid4().hex[:8]),
+        "id": str(project_id or identity.get("id") or uuid.uuid4().hex[:8]),
         "title": clamp_title(str(identity.get("title") or topic)),
         "language": identity.get("language") or "es",
     }
     return normalized
 
 
-def to_content_package(raw: dict[str, Any], topic: str) -> ContentPackage:
+def to_content_package(
+    raw: dict[str, Any], topic: str, *, project_id: str | None = None
+) -> ContentPackage:
     """Convierte la respuesta del modelo en un :class:`ContentPackage`.
 
     El validator rellena con valores por defecto cualquier campo ausente. Si
     la respuesta fuera estructuralmente irrecuperable (no un dict), se
     devuelve un paquete mínimo válido conservando el tema.
     """
-    normalized = ensure_identity(_without_unrealized(raw), topic)
+    normalized = ensure_identity(
+        _without_unrealized(raw), topic, project_id=project_id
+    )
     try:
         return content_package_from_dict(normalized)
     except (ContentValidationError, ValueError, KeyError, TypeError) as exc:
@@ -136,13 +182,15 @@ def generate_package(adapter: AIAdapter, topic: str) -> dict[str, Any]:
 
     Intenta Structured Output (``response_schema``) y, si el proveedor o el
     modelo no lo soportan (``parsed`` es ``None``), cae a texto libre parseado
-    con :func:`extract_json`.
+    con :func:`extract_json`. El ``topic`` se reenvía al proveedor por
+    ``kwargs`` para que los proveedores sintéticos lo usen como tema real.
     """
     prompt = build_prompt(topic)
     structured = adapter.generate_structured(
         prompt,
         CONTENT_PACKAGE_SCHEMA,
         max_output_tokens=8192,
+        topic=topic,
     )
     if structured is not None:
         logger.info("Respuesta estructurada obtenida directamente de Gemini.")
@@ -152,6 +200,48 @@ def generate_package(adapter: AIAdapter, topic: str) -> dict[str, Any]:
     )
     text = adapter.generate_text(prompt, max_output_tokens=8192)
     return extract_json(text)
+
+
+def generate_content_to_path(
+    topic: str,
+    output_path: Path,
+    *,
+    project_id: str | None = None,
+) -> int:
+    """Genera el ContentPackage para un tema y lo persiste en ``output_path``.
+
+    Es la función interna reutilizable del script: recibe la ruta de salida de
+    forma explícita (permite al PipelineRunner escribir en un run aislado).
+    Devuelve 0 en éxito y 1 en error.
+
+    Args:
+        topic: tema del Short.
+        output_path: ruta absoluta del archivo ``content.json`` a escribir.
+        project_id: identificador opcional que fuerza ``identity.id``.
+    """
+    if not topic.strip():
+        logger.error("El tema no puede estar vacío.")
+        return 1
+
+    try:
+        adapter = build_content_provider()
+        logger.info("Generando contenido para: %s", topic)
+        raw = generate_package(adapter, topic)
+        package = to_content_package(raw, topic, project_id=project_id)
+    except AIError as exc:
+        logger.error("Error del proveedor de IA: %s", exc)
+        return 1
+    except ValueError as exc:
+        logger.error("Error al interpretar la respuesta: %s", exc)
+        return 1
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        content_package_to_json(package),
+        encoding="utf-8",
+    )
+    logger.info("Contenido guardado en: %s", output_path)
+    return 0
 
 
 def main() -> int:
@@ -167,25 +257,7 @@ def main() -> int:
         logger.error("El tema no puede estar vacío.")
         return 1
 
-    try:
-        adapter = AIAdapter(GeminiProvider(model=resolve_model()))
-        logger.info("Generando contenido para: %s", topic)
-        raw = generate_package(adapter, topic)
-        package = to_content_package(raw, topic)
-    except AIError as exc:
-        logger.error("Error del proveedor de IA: %s", exc)
-        return 1
-    except ValueError as exc:
-        logger.error("Error al interpretar la respuesta: %s", exc)
-        return 1
-
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(
-        content_package_to_json(package),
-        encoding="utf-8",
-    )
-    logger.info("Contenido guardado en: %s", OUTPUT_PATH)
-    return 0
+    return generate_content_to_path(topic, OUTPUT_PATH)
 
 
 if __name__ == "__main__":

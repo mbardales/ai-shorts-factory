@@ -101,12 +101,16 @@ class ProjectMetadata:
         created_at: fecha de creación en formato ISO-8601.
         updated_at: fecha de última actualización en formato ISO-8601.
         content_file: ruta relativa al ContentPackage de origen (opcional).
+        run_id: identificador de la ejecución del pipeline que generó el
+            manifest (``run-YYYYMMDD-HHMMSS``); ``None`` si la ejecución no
+            usó un :class:`pipeline.RunContext` (legacy, retrocompatible).
     """
 
     schema_version: int = 1
     created_at: str = ""
     updated_at: str = ""
     content_file: Optional[str] = None
+    run_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +163,7 @@ def build_project_manifest(
     output_file: Optional[str] = None,
     estimated_duration_seconds: Optional[float] = None,
     image_providers: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    run_id: Optional[str] = None,
 ) -> ProjectManifest:
     """Construye un :class:`ProjectManifest` a partir de los insumos del pipeline.
 
@@ -178,6 +183,8 @@ def build_project_manifest(
             por nombre de archivo (ej. ``"scene_001.png"``) y con las claves
             ``provider``/``model``. Si una imagen no está en el mapa, su
             metadata queda en ``None``.
+        run_id: identificador opcional de la ejecución del pipeline que generó
+            el manifest; ``None`` para ejecuciones legacy.
 
     Returns:
         Manifest completo con la identidad heredada del contenido.
@@ -237,6 +244,7 @@ def build_project_manifest(
         created_at=now,
         updated_at=now,
         content_file=content_file,
+        run_id=run_id,
     )
 
     return ProjectManifest(

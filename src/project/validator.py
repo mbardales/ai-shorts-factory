@@ -191,6 +191,7 @@ def _coerce_metadata(data: Any) -> ProjectMetadata:
         created_at=_as_str(data.get("created_at")) or now,
         updated_at=_as_str(data.get("updated_at")) or now,
         content_file=_as_optional_str(data.get("content_file")),
+        run_id=_as_optional_str(data.get("run_id")),
     )
 
 

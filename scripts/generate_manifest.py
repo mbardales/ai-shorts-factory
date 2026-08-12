@@ -104,8 +104,10 @@ def load_image_providers(path: Path) -> dict[str, dict[str, str]]:
     return result
 
 
-def detect_assets(directory: Path, extensions: set[str]) -> list[str]:
-    """Devuelve rutas relativas a ``output/`` de los activos detectados.
+def detect_assets(
+    directory: Path, extensions: set[str], *, base_dir: Path = OUTPUT_DIR
+) -> list[str]:
+    """Devuelve rutas relativas a ``base_dir`` de los activos detectados.
 
     Los activos se ordenan por nombre para garantizar un orden estable; las
     imágenes se asignan a las escenas en ese mismo orden.
@@ -113,41 +115,58 @@ def detect_assets(directory: Path, extensions: set[str]) -> list[str]:
     Args:
         directory: directorio a inspeccionar.
         extensions: extensiones (sin punto) reconocidas como activos.
+        base_dir: directorio base respecto al cual se expresan las rutas
+            (por defecto ``output/``).
 
     Returns:
-        Lista ordenada de rutas relativas a ``output/``.
+        Lista ordenada de rutas relativas a ``base_dir``.
     """
     if not directory.is_dir():
         logger.warning("No se encontró el directorio de activos: %s", directory)
         return []
     found = [
-        path.relative_to(OUTPUT_DIR).as_posix()
+        path.relative_to(base_dir).as_posix()
         for path in directory.iterdir()
         if path.is_file() and path.suffix.lower().lstrip(".") in extensions
     ]
     return sorted(found)
 
 
-def main() -> int:
-    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+def generate_manifest_to_path(
+    output_dir: Path,
+    *,
+    run_id: str | None = None,
+) -> int:
+    """Construye y persiste el Project Manifest en ``output_dir/project.json``.
 
-    if not INPUT_PATH.is_file():
-        logger.error("No se encontró el ContentPackage: %s", INPUT_PATH)
+    Es la función interna reutilizable del script: recibe el directorio de
+    salida de forma explícita (permite al PipelineRunner escribir en un run
+    aislado). Devuelve 0 en éxito y 1 en error.
+
+    Args:
+        output_dir: directorio absoluto de salida del run (contiene
+            ``content.json``, ``images/`` y ``audio/``).
+        run_id: identificador de la ejecución del pipeline que se registra en
+            ``metadata.run_id`` del manifest (opcional).
+    """
+    content_path = output_dir / "content.json"
+    images_dir = output_dir / "images"
+    audio_dir = output_dir / "audio"
+    project_path = output_dir / "project.json"
+
+    if not content_path.is_file():
+        logger.error("No se encontró el ContentPackage: %s", content_path)
         return 1
 
     try:
-        package = content_package_from_json(INPUT_PATH.read_text(encoding="utf-8"))
+        package = content_package_from_json(content_path.read_text(encoding="utf-8"))
     except (ValueError, ContentValidationError) as exc:
         logger.error("No se pudo leer el ContentPackage: %s", exc)
         return 1
 
-    image_paths = detect_assets(IMAGES_DIR, IMAGE_EXTENSIONS)
-    audio_paths = detect_assets(AUDIO_DIR, AUDIO_EXTENSIONS)
-    image_providers = load_image_providers(IMAGES_DIR / "providers.json")
+    image_paths = detect_assets(images_dir, IMAGE_EXTENSIONS, base_dir=output_dir)
+    audio_paths = detect_assets(audio_dir, AUDIO_EXTENSIONS, base_dir=output_dir)
+    image_providers = load_image_providers(images_dir / "providers.json")
 
     manifest = build_project_manifest(
         content_package_to_dict(package),
@@ -155,6 +174,7 @@ def main() -> int:
         audio_paths,
         content_file="content.json",
         image_providers=image_providers,
+        run_id=run_id,
     )
 
     try:
@@ -163,17 +183,26 @@ def main() -> int:
         logger.error("El manifest no supera la validación: %s", exc)
         return 1
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(project_manifest_to_json(manifest), encoding="utf-8")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    project_path.write_text(project_manifest_to_json(manifest), encoding="utf-8")
     logger.info(
         "Manifest guardado en: %s (%d imágenes, %d pistas de audio, "
         "duración estimada %.1fs).",
-        OUTPUT_PATH,
+        project_path,
         len(image_paths),
         len(audio_paths),
         manifest.estimated_duration_seconds,
     )
     return 0
+
+
+def main() -> int:
+    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    return generate_manifest_to_path(OUTPUT_DIR)
 
 
 if __name__ == "__main__":

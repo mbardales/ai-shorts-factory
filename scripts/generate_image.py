@@ -146,19 +146,22 @@ def build_image_provider(provider: str | None = None) -> ImageProvider:
     )
 
 
-def load_content_package() -> "ContentPackage":
-    """Lee y reconstruye el ContentPackage desde ``output/content.json``.
+def load_content_package(content_path: Path) -> "ContentPackage":
+    """Lee y reconstruye el ContentPackage desde ``content_path``.
+
+    Args:
+        content_path: ruta absoluta del ``content.json`` de entrada.
 
     Raises:
         FileNotFoundError: si el archivo de entrada no existe.
         ValueError: si el JSON no se puede reconstruir como ContentPackage.
     """
-    if not INPUT_PATH.is_file():
+    if not content_path.is_file():
         raise FileNotFoundError(
-            f"No se encontró {INPUT_PATH}. "
+            f"No se encontró {content_path}. "
             "Ejecuta primero 'python scripts/generate_content.py'."
         )
-    return content_package_from_json(INPUT_PATH.read_text(encoding="utf-8"))
+    return content_package_from_json(content_path.read_text(encoding="utf-8"))
 
 
 def clean_image_outputs(storage: LocalStorage) -> None:
@@ -220,16 +223,19 @@ def write_providers_atomic(data: dict, path: Path) -> None:
         raise
 
 
-def main() -> int:
-    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    load_project_env()
+def generate_images_to_path(content_path: Path, images_dir: Path) -> int:
+    """Genera una imagen por escena y las persiste en ``images_dir``.
 
+    Es la función interna reutilizable del script: recibe rutas explícitas de
+    entrada y salida (permite al PipelineRunner escribir en un run aislado).
+    Devuelve 0 en éxito y 1 en error.
+
+    Args:
+        content_path: ruta absoluta del ``content.json`` de entrada.
+        images_dir: directorio absoluto donde se guardan las imágenes.
+    """
     try:
-        package = load_content_package()
+        package = load_content_package(content_path)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("%s", exc)
         return 1
@@ -286,7 +292,7 @@ def main() -> int:
         primary.provider.model,
     )
 
-    storage = LocalStorage(OUTPUT_IMAGES_DIR, auto_create=True)
+    storage = LocalStorage(images_dir, auto_create=True)
     clean_image_outputs(storage)
     providers: dict[str, dict[str, Optional[str]]] = {}
     for number, visual in enumerate(visual_prompts, start=1):
@@ -307,7 +313,7 @@ def main() -> int:
         }
         logger.info("Imagen guardada: %s", path)
 
-    providers_path = OUTPUT_IMAGES_DIR / "providers.json"
+    providers_path = images_dir / "providers.json"
     try:
         write_providers_atomic(providers, providers_path)
     except OSError as exc:
@@ -315,6 +321,16 @@ def main() -> int:
         return 1
     logger.info("Metadata de providers guardada: %s", providers_path)
     return 0
+
+
+def main() -> int:
+    """Punto de entrada del script. Devuelve 0 en éxito, 1 en error."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    load_project_env()
+    return generate_images_to_path(INPUT_PATH, OUTPUT_IMAGES_DIR)
 
 
 if __name__ == "__main__":
