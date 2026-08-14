@@ -17,6 +17,8 @@ Convertir una idea simple en un Short de YouTube listo para publicar:
 - **Manifest de proyecto:** detección automática de activos y construcción de
   `output/project.json`, única fuente de verdad del renderizado.
 - **Render:** composición de escenas + audio y codificación final con FFmpeg.
+- **Quality Gate:** verificación read-only del run (content/manifest, escenas,
+  audio/video decodificables, sync A/V, provenance) con veredicto PASS/WARN/FAIL.
 
 ## Arquitectura resumida
 
@@ -45,10 +47,21 @@ generate_image.py    →  output/images/scene_*.png + providers.json
 generate_audio.py    →  output/audio/narration.mp3 | narration.wav
 generate_manifest.py →  output/project.json
 render_video.py      →  output/video/*.mp4  (FFmpeg)
+quality_gate.py      →  veredicto PASS / FAIL (read-only)
 ```
 
 Los scripts se ejecutan en orden estricto; cada etapa consume la salida de la
-anterior. `run_pipeline.py` orquesta las etapas 1–3.
+anterior. `run_pipeline.py` orquesta las seis etapas dentro de un directorio
+de ejecución aislado (`output/runs/<run_id>/`), de modo que un run no pisa los
+artefactos de otro.
+
+Tras el render, el **Quality Gate** (`src/quality`, read-only) inspecciona el
+run: content/manifest válidos, una imagen por escena, audio y video decodificables,
+duración y sync A/V, provenance y residuos. Un check fallido de severidad
+`error` marca el run como **FAIL** (pipeline `success=False`, exit 1); las
+desviaciones no críticas producen **WARN** y el run sigue siendo **PASS**.
+El gate no modifica ni borra nada: los artefactos del run se conservan ante un
+FAIL para diagnóstico.
 
 ## Providers
 
@@ -69,13 +82,20 @@ Requisitos: Python 3.14 (`scripts/requirements.txt`), un `.env` raíz con
 .venv\Scripts\python.exe scripts/generate_audio.py
 .venv\Scripts\python.exe scripts/generate_manifest.py
 .venv\Scripts\python.exe scripts/render_video.py
+.venv\Scripts\python.exe scripts/quality_gate.py
 ```
 
-O bien, etapas 1–3 juntas:
+O bien, el pipeline completo (contenido → imagen → audio → manifest → render →
+quality) de una sola vez:
 
 ```powershell
 .venv\Scripts\python.exe scripts/run_pipeline.py "Un eclipse solar total"
 ```
+
+Opciones útiles: `--offline` (proveedores sintéticos, sin API ni red),
+`--run-id run-YYYYMMDD-HHMMSS` (fijar el identificador del run) y
+`--project-id <id>` (forzar `identity.id` del manifest). El Quality Gate es la
+última etapa en `run_pipeline.py`; un FAIL no borra los artefactos del run.
 
 ## Modo offline
 
@@ -100,7 +120,7 @@ config/    Configuración base (project.json, providers.json, settings.json, ...
 docs/      Documentación (arquitectura, guías, roadmap, decisiones)
 prompts/   Scaffolding de contenido para LLM (vacío)
 workflows/ Scaffolding de orquestación (vacío)
-scripts/   Etapas del pipeline + helpers (generate_*, render_video, run_pipeline)
+scripts/   Etapas del pipeline + helpers (generate_*, render_video, quality_gate, run_pipeline)
 src/       Paquetes de código (ai, content, image, audio, media, project, renderer, video, config)
 output/    Salidas generadas (gitignored)
 ```
@@ -108,7 +128,7 @@ output/    Salidas generadas (gitignored)
 ## Estado del proyecto
 
 - Pipeline de generación **funcional end-to-end** (contenido → imágenes →
-  audio → manifest → render).
+  audio → manifest → render → quality gate).
 - Providers de texto, imagen y audio implementados, con modo sintético offline.
 - En desarrollo sobre la rama `feature/project-manifest`.
 - Pendiente: flujo de análisis de Shorts, publicación en YouTube,

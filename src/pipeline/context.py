@@ -27,6 +27,7 @@ los directorios de forma **implícita** al preparar el contexto (no se exige un
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -39,8 +40,14 @@ logger = logging.getLogger(__name__)
 #: Raíz del proyecto (dos niveles por encima de este módulo).
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-#: Raíz por defecto de todas las ejecuciones del pipeline.
-RUNS_ROOT = PROJECT_ROOT / "output" / "runs"
+#: Variable de entorno opcional que sobrescribe la raíz de ejecuciones
+#: (aisla las pruebas de la salida real del repo).
+RUNS_ROOT_ENV = "PIPELINE_RUNS_ROOT"
+
+#: Raíz por defecto de todas las ejecuciones del pipeline. Se puede
+#: sobrescribir con ``PIPELINE_RUNS_ROOT`` (por ejemplo en tests con árbol
+#: temporal, sin tocar ``output/`` real).
+RUNS_ROOT = Path(os.environ.get(RUNS_ROOT_ENV, PROJECT_ROOT / "output" / "runs"))
 
 #: Expresión regular del formato de ``run_id``: ``run-YYYYMMDD-HHMMSS`` (UTC).
 RUN_ID_PATTERN = re.compile(r"^run-\d{8}-\d{6}$")

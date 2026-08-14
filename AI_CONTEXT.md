@@ -9,7 +9,7 @@ manda.
 
 "AI Shorts Factory": generar YouTube Shorts de forma asistida por IA desde un
 solo tema. El pipeline completo (contenido → imágenes → audio → manifest →
-render FFmpeg) está **implementado y funcional**.
+render FFmpeg → quality gate) está **implementado y funcional**.
 
 ## Stack
 
@@ -44,10 +44,19 @@ generate_image.py    →  output/images/scene_*.png + providers.json
 generate_audio.py    →  output/audio/narration.mp3 | narration.wav
 generate_manifest.py →  output/project.json
 render_video.py      →  output/video/*.mp4  (FFmpeg)
+quality_gate.py      →  veredicto PASS / WARN / FAIL (read-only)
 ```
 
 - Etapas en orden estricto; cada una consume la salida de la anterior.
-- `run_pipeline.py` orquesta contenido + imagen + audio.
+- `run_pipeline.py` orquesta las seis etapas en un run aislado
+  (`output/runs/<run_id>/`) vía `src/pipeline` (PipelineRunner + RunContext).
+- **Quality Gate** (`src/quality`, ME27/ME28): etapa **read-only** que
+  inspecciona el run tras el render (content/manifest válidos, una imagen por
+  escena, audio y video decodificables, duración y sync A/V, provenance y
+  residuos). Veredictos: **PASS**, **WARN** (solo desviaciones no críticas) y
+  **FAIL** (algún check de severidad `error`). El FAIL deja `success=False` y
+  exit code 1, pero **conserva todos los artefactos del run** (incluido
+  `video_path` en `PipelineResult`) para diagnóstico.
 - `test_gemini.py` es un smoke test de API en vivo, no un test unitario.
 
 ## Módulos de `src/` (estado real)
@@ -62,6 +71,7 @@ render_video.py      →  output/video/*.mp4  (FFmpeg)
 | `src/audio` | Generación de narración: providers + adapter | **Implementado** |
 | `src/project` | Project Manifest (agregado, serializer, validator) | **Implementado** |
 | `src/renderer` | Builder + executor de comandos FFmpeg | **Implementado** |
+| `src/quality` | Quality Gate read-only: checks de integridad, decodificación y sync A/V → PASS/WARN/FAIL | **Implementado** |
 | `src/video` | Abstracción planeada de video (Timeline, VideoAdapter). **No cableada**; nada la importa | **Pendiente / no usado** |
 | `src/config` | Carga centralizada de `.env` | **Implementado** |
 
@@ -115,10 +125,12 @@ Ver `scripts/.env.example` para la documentación canónica. Principales:
 ## Comandos
 
 - Python del repo: `.venv\Scripts\python.exe`.
-- Etapas individuales: `scripts/generate_*.py` y `scripts/render_video.py`
-  (este último con docstring que documenta exit codes 0–4).
-- Todo junto (etapas 1–3): `python scripts/run_pipeline.py "<tema>"` (o env
-  `PIPELINE_TOPIC`).
+- Etapas individuales: `scripts/generate_*.py`, `scripts/render_video.py`
+  (docstring con exit codes 0–4) y `scripts/quality_gate.py` (docstring con
+  veredictos PASS/WARN/FAIL y exit codes 0–3).
+- Todo junto: `python scripts/run_pipeline.py "<tema>"` (o env `PIPELINE_TOPIC`);
+  orquesta contenido → imagen → audio → manifest → render → quality en
+  `output/runs/<run_id>/`. Flags: `--offline`, `--run-id`, `--project-id`.
 
 ## Decisiones técnicas relevantes
 
@@ -129,10 +141,13 @@ Ver `scripts/.env.example` para la documentación canónica. Principales:
   sintético nunca se activa automáticamente.
 - **Manifest como fuente de verdad:** `output/project.json` gobierna el render
   FFmpeg (`src/renderer/ffmpeg.py`, `commands.py`, executor).
+- **Quality Gate read-only:** el gate nunca modifica ni borra artefactos; ante
+  un FAIL el run se conserva intacto (`success=False`, exit 1, `video_path`
+  presente) para diagnóstico.
 
 ## Estado actual
 
-- Pipeline **funcional end-to-end**.
+- Pipeline **funcional end-to-end** (incluye Quality Gate como etapa final).
 - **Limitación conocida:** la clave Gemini actual tiene **cero cuota de
   generación de imágenes** (`RESOURCE_EXHAUSTED` en Imagen). Se mitiga con
   Stability o el modo sintético. Esta limitación es transitoria (depende de la

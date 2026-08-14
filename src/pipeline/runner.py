@@ -1,18 +1,20 @@
 """PipelineRunner: orquestador end-to-end del pipeline de AI Shorts Factory.
 
-Implementa el orquestador real de ME27: ejecuta las cinco etapas del pipeline
-(contenido → imagen → audio → manifest → render) dentro de un directorio de
-ejecución aislado (:class:`pipeline.context.RunContext` / ``RunDirectory``),
-reutilizando las funciones internas de los scripts en lugar de invocarlos por
-``subprocess``.
+Implementa el orquestador real de ME27: ejecuta las seis etapas del pipeline
+(contenido → imagen → audio → manifest → render → quality) dentro de un
+directorio de ejecución aislado (:class:`pipeline.context.RunContext` /
+``RunDirectory``), reutilizando las funciones internas de los scripts en lugar
+de invocarlos por ``subprocess``.
 
 Principios:
 
 - **Aislamiento**: todas las etapas trabajan sobre ``context.output_dir``; no se
   toca ``output/`` global (legacy).
-- **Detención ante fallo**: si una etapa falla, no se ejecutan las siguientes.
+- **Detención ante fallo**: si una etapa falla (incluido el Quality Gate), no se
+  ejecutan las siguientes y el pipeline se marca como fallido.
 - **Resultado estructurado**: :class:`pipeline.models.PipelineResult` con el
-  resultado por etapa (:class:`pipeline.models.StageResult`).
+  resultado por etapa (:class:`pipeline.models.StageResult`) y el veredicto del
+  Quality Gate (:class:`quality.models.QualityGateResult`).
 - **Artefactos conservados**: un run fallido no se borra; queda en
   ``output/runs/<run_id>/`` para diagnóstico.
 - **Sin ``subprocess``**: las etapas importan y llaman directamente las
@@ -46,6 +48,7 @@ STAGE_IMAGE = "image"
 STAGE_AUDIO = "audio"
 STAGE_MANIFEST = "manifest"
 STAGE_RENDER = "render"
+STAGE_QUALITY = "quality"
 
 STAGE_ORDER: tuple[str, ...] = (
     STAGE_CONTENT,
@@ -53,6 +56,7 @@ STAGE_ORDER: tuple[str, ...] = (
     STAGE_AUDIO,
     STAGE_MANIFEST,
     STAGE_RENDER,
+    STAGE_QUALITY,
 )
 
 #: Variable de entorno que selecciona el proveedor de contenido.
@@ -86,6 +90,7 @@ class PipelineRunner:
         self._topic = (topic or "").strip() or None
         self._offline = bool(offline)
         self._project_id = project_id
+        self._quality_result: Optional[object] = None
 
     @property
     def context(self) -> RunContext:
@@ -93,13 +98,16 @@ class PipelineRunner:
         return self._context
 
     def run(self) -> PipelineResult:
-        """Ejecuta las cinco etapas del pipeline en orden.
+        """Ejecuta las seis etapas del pipeline en orden.
 
         Crea los directorios del run (implícito), aplica el entorno offline si
-        corresponde y ejecuta las etapas hasta el primer fallo.
+        corresponde y ejecuta las etapas hasta el primer fallo. La etapa
+        ``quality`` corre solo si el render terminó bien y determina el
+        ``success`` final (un run que no pasa el gate es un fallo).
 
         Returns:
-            :class:`PipelineResult` con el resultado de cada etapa ejecutada.
+            :class:`PipelineResult` con el resultado de cada etapa ejecutada
+            y el veredicto del Quality Gate.
         """
         context = self._context
         logger.info("Preparando ejecución run_id=%s...", context.run_id)
@@ -129,7 +137,16 @@ class PipelineRunner:
         success = failed is None
         output_dir = context.output_dir
         project_path = output_dir / "project.json"
-        video_path = self._find_video(output_dir / "video") if success else None
+
+        # El video_path se conserva si el render terminó bien, aunque el
+        # Quality Gate falle después (los artefactos se conservan para
+        # diagnóstico; el run sigue siendo un fallo).
+        render_succeeded = any(
+            stage.name == STAGE_RENDER and stage.success for stage in stages
+        )
+        video_path = (
+            self._find_video(output_dir / "video") if render_succeeded else None
+        )
 
         if success:
             logger.info(
@@ -149,6 +166,7 @@ class PipelineRunner:
             stages=tuple(stages),
             project_path=project_path if project_path.is_file() else None,
             video_path=video_path,
+            quality_result=self._quality_result,
             error=failed.error if failed else None,
         )
 
@@ -165,7 +183,10 @@ class PipelineRunner:
             exit_code = self._call_stage(name)
             success = exit_code == 0
             if not success:
-                error = f"La etapa '{name}' terminó con código {exit_code}."
+                if name == STAGE_QUALITY and self._quality_result is not None:
+                    error = self._quality_failure_message(self._quality_result)
+                else:
+                    error = f"La etapa '{name}' terminó con código {exit_code}."
         except PipelineValidationError as exc:
             error = str(exc)
         except Exception as exc:  # noqa: BLE001 - capturar y registrar el fallo
@@ -197,6 +218,8 @@ class PipelineRunner:
             return self._run_manifest()
         if name == STAGE_RENDER:
             return self._run_render()
+        if name == STAGE_QUALITY:
+            return self._run_quality()
         raise PipelineValidationError(f"Etapa desconocida: {name!r}")
 
     def _run_content(self) -> int:
@@ -246,6 +269,29 @@ class PipelineRunner:
         from render_video import render_video_to_path
 
         return render_video_to_path(self._context.output_dir / "project.json")
+
+    def _run_quality(self) -> int:
+        """Etapa de quality: verifica el run con el Quality Gate (read-only).
+
+        La inspección es estrictamente de solo lectura: no borra ni regenera
+        artefactos. Devuelve 0 si el run pasa el gate (sin errores) o 1 en
+        caso contrario.
+        """
+        from quality import run_quality_gate
+
+        result = run_quality_gate(self._context.output_dir)
+        self._quality_result = result
+        return 0 if result.passed else 1
+
+    @staticmethod
+    def _quality_failure_message(result: object) -> str:
+        """Compone el mensaje de error de la etapa quality a partir de los
+        checks fallidos del gate."""
+        failed = [c for c in result.checks if c.severity == "error" and not c.passed]
+        if failed:
+            detail = "; ".join(check.message for check in failed)
+            return f"Quality Gate FAIL ({len(failed)} check(s) de error): {detail}"
+        return "Quality Gate FAIL."
 
     # ------------------------------------------------------------------
     # Ayudantes

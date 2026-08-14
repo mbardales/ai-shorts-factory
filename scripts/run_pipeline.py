@@ -1,7 +1,7 @@
 """Pipeline Runner CLI de AI Shorts Factory.
 
-Orquesta el pipeline completo (contenido → imagen → audio → manifest → render)
-a través de :class:`pipeline.PipelineRunner` dentro de un directorio de
+Orquesta el pipeline completo (contenido → imagen → audio → manifest → render →
+quality) a través de :class:`pipeline.PipelineRunner` dentro de un directorio de
 ejecución aislado (:class:`pipeline.RunContext`).
 
 Flujo:
@@ -10,9 +10,15 @@ Flujo:
 2. Resuelve el tema (argumento posicional o ``PIPELINE_TOPIC``).
 3. Crea un :class:`RunContext` (o usa el ``--run-id`` indicado) y prepara los
    directorios aislados ``output/runs/<run_id>/{input,output}``.
-4. Ejecuta el :class:`PipelineRunner`, que corre las cinco etapas en orden y se
-   detiene ante el primer fallo (conservando los artefactos del run para
-   diagnóstico).
+4. Ejecuta el :class:`PipelineRunner`, que corre las seis etapas en orden. La
+   etapa ``quality`` verifica el run con el Quality Gate solo si el render
+   terminó bien; si el gate falla, el pipeline se marca como fallido (los
+   artefactos se conservan).
+
+Códigos de salida:
+
+- 0: el pipeline y el Quality Gate pasaron.
+- 1: falló alguna etapa (incluido el Quality Gate).
 
 Modo ``--offline``: selecciona los proveedores sintéticos (contenido, imagen y
 audio) sin modificar el ``.env``; no se realiza ninguna llamada HTTP.
@@ -137,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             f" ({stage.error})" if stage.error else "",
         )
 
+    _log_quality_result(result)
+
     if result.success:
         logger.info("Pipeline completado: run_id=%s", result.run_id)
         logger.info("Manifest: %s", result.project_path)
@@ -152,6 +160,29 @@ def main(argv: list[str] | None = None) -> int:
         "Artefactos conservados para diagnóstico en: %s", context.run_dir
     )
     return 1
+
+
+def _log_quality_result(result) -> None:
+    """Registra el veredicto del Quality Gate en el log del CLI."""
+    quality = getattr(result, "quality_result", None)
+    if quality is None:
+        return
+    if quality.passed:
+        logger.info(
+            "Quality Gate: PASS (errores=%d, avisos=%d)",
+            quality.errors,
+            quality.warnings,
+        )
+    else:
+        logger.error(
+            "Quality Gate: FAIL (errores=%d, avisos=%d)",
+            quality.errors,
+            quality.warnings,
+        )
+    for check in quality.failed_checks:
+        logger.error("  [gate] %s: %s", check.name, check.message)
+    for check in quality.warning_checks:
+        logger.warning("  [gate] %s: %s", check.name, check.message)
 
 
 if __name__ == "__main__":

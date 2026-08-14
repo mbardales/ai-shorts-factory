@@ -13,7 +13,7 @@ pipeline completo. Refleja el estado real del código en la rama
 - **Stack:** Python 3.14; dependencias en `scripts/requirements.txt`
   (`google-genai`, `python-dotenv`), instaladas en el `.venv` del repo.
 - **Requisitos externos:** FFmpeg + ffprobe en el PATH para la etapa de render.
-- **Última actualización:** 2026-08-11.
+- **Última actualización:** 2026-08-13.
 
 ## Entorno
 
@@ -41,33 +41,57 @@ un smoke test de API en vivo, no un test unitario.
 .venv\Scripts\python.exe scripts/generate_audio.py     # → output/audio/narration.mp3 | narration.wav
 .venv\Scripts\python.exe scripts/generate_manifest.py  # → output/project.json
 .venv\Scripts\python.exe scripts/render_video.py       # → output/video/*.mp4  (exit codes 0–4 en su docstring)
+.venv\Scripts\python.exe scripts/quality_gate.py       # → veredicto PASS/WARN/FAIL (exit codes 0–3 en su docstring)
 ```
 
 Cada etapa consume la salida de la anterior; no invertir el orden.
 
-### Etapas 1–3 juntas
+El **Quality Gate** (`scripts/quality_gate.py`, respaldado por `src/quality`)
+es una etapa **read-only**: inspecciona el run (content/manifest válidos, una
+imagen por escena, audio y video decodificables, duración y sync A/V,
+provenance y residuos) y emite **PASS**, **WARN** (desviaciones no críticas) o
+**FAIL** (check de severidad `error` fallido). No modifica ni borra nada: ante
+un FAIL los artefactos del run se conservan para diagnóstico.
+
+### Pipeline completo de una vez
 
 ```powershell
 .venv\Scripts\python.exe scripts/run_pipeline.py "<tema>"
 # o con la variable PIPELINE_TOPIC
 ```
 
+Orquesta las seis etapas en orden dentro de un run aislado
+(`output/runs/<run_id>/`): contenido, imagen, audio, manifest, render y quality.
+Se detiene ante el primer fallo y conserva los artefactos del run para
+diagnóstico. Opciones: `--offline` (todo sintético), `--run-id
+run-YYYYMMDD-HHMMSS` (fijar identificador) y `--project-id <id>`.
+
 ### Pipeline offline (sin APIs)
 
-Usa los providers sintéticos para imagen y audio, más FFmpeg para el render:
+Usa los providers sintéticos para contenido, imagen y audio, más FFmpeg para
+el render; se puede lanzar con `--offline`:
 
 ```powershell
+.venv\Scripts\python.exe scripts/run_pipeline.py "<tema>" --offline
+```
+
+O de forma individual fijando cada provider en el entorno:
+
+```powershell
+$env:GEMINI_CONTENT_PROVIDER = "synthetic"
 $env:GEMINI_IMAGE_PROVIDER = "synthetic"
 $env:GEMINI_AUDIO_PROVIDER = "synthetic"
 .venv\Scripts\python.exe scripts/generate_image.py
 .venv\Scripts\python.exe scripts/generate_audio.py
 .venv\Scripts\python.exe scripts/generate_manifest.py
 .venv\Scripts\python.exe scripts/render_video.py
+.venv\Scripts\python.exe scripts/quality_gate.py
 ```
 
 No requiere API key ni HTTP; el camino offline está validado end-to-end.
 Nota: `GEMINI_IMAGE_PROVIDER=synthetic` debe fijarse explícitamente; el fallback
-nunca incluye al provider sintético automáticamente.
+nunca incluye al provider sintético automáticamente. El Quality Gate solo valida
+un run existente (también funciona offline, con FFmpeg/ffprobe en el PATH).
 
 ## Providers y configuración
 

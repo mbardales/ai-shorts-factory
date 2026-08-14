@@ -10,7 +10,7 @@ ingrese al repositorio. **Refleja el estado real del código** en la rama
 ## Estado
 
 - **Etapa del proyecto:** Implementación — pipeline funcional end-to-end.
-- **Última actualización:** 2026-08-11.
+- **Última actualización:** 2026-08-13.
 - **Histórico de cambios:** ver `git log`.
 
 ## Descripción
@@ -27,7 +27,7 @@ flujo de **análisis** de Shorts existentes sigue pendiente.
 - **Implementado y funcional:** pipeline de generación completo
   (`src/` + `scripts/`), desde contenido hasta render FFmpeg.
 - **Módulos implementados:** `content`, `prompt_engine`, `ai`, `media`,
-  `image`, `audio`, `project`, `renderer`, `config`.
+  `image`, `audio`, `project`, `renderer`, `quality`, `config`.
 - **Pendiente:** módulo `video` (abstracción planeada, no cableada),
   análisis de Shorts, publicación a YouTube, orquestación en `workflows/`,
   herramientas de calidad (lint/typecheck/tests).
@@ -60,9 +60,21 @@ generate_image.py    →  output/images/scene_*.png + providers.json
 generate_audio.py    →  output/audio/narration.mp3 | narration.wav
 generate_manifest.py →  output/project.json
 render_video.py      →  output/video/*.mp4  (FFmpeg)
+quality_gate.py      →  veredicto PASS / WARN / FAIL (read-only)
 ```
 
-`run_pipeline.py` orquesta contenido + imagen + audio.
+`run_pipeline.py` orquesta las seis etapas (contenido → imagen → audio →
+manifest → render → quality) dentro de un run aislado `output/runs/<run_id>/`
+mediante `src/pipeline` (PipelineRunner + RunContext), deteniéndose ante el
+primer fallo.
+
+Tras el render, el **Quality Gate** (`src/quality`, read-only) inspecciona el
+run: content/manifest válidos, una imagen por escena, audio y video
+decodificables, duración y sync A/V, provenance y residuos. Un check fallido
+de severidad `error` produce **FAIL** (pipeline `success=False`, exit 1);
+desviaciones no críticas producen **WARN** y el run sigue siendo **PASS**. El
+gate no modifica ni borra nada: ante un FAIL se conservan todos los artefactos
+del run (incluido el video renderizado) para diagnóstico.
 
 ### Providers
 
@@ -76,6 +88,7 @@ render_video.py      →  output/video/*.mp4  (FFmpeg)
   `synthetic` (imagen + audio) + FFmpeg. Validado end-to-end.
 - `SyntheticImageProvider` nunca se activa automáticamente como fallback; el
   fallback permite un único cambio por run.
+- El Quality Gate solo valida un run existente; no genera ni modifica activos.
 
 ### Documentación
 
@@ -98,6 +111,8 @@ render_video.py      →  output/video/*.mp4  (FFmpeg)
   usado (`providers.json`, escrito atómicamente por `generate_image.py`).
 - **Manifest como fuente de verdad:** `output/project.json` gobierna el render
   FFmpeg.
+- **Quality Gate read-only:** `src/quality` inspecciona el run tras el render
+  sin modificarlo; ante un FAIL se conservan los artefactos para diagnóstico.
 - **Offline-first:** providers sintéticos para imagen y audio, sin API keys.
 
 ### Limitaciones conocidas
