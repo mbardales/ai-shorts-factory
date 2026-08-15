@@ -11,11 +11,16 @@ from .models import ImageScenes, SceneVisual, VisualPrompt
 
 
 #: Plantilla base de un prompt visual de escena. ``index`` es 1-based (texto
-#: legible) y ``description`` es la descripción de la escena.
+#: legible) y ``description`` es la descripción de la escena (que ya incluye el
+#: plano y el estilo por categoría). Añade de forma automática la composición
+#: vertical 9:16, el realismo y el detalle, y evita texto, logotipos, marcas de
+#: agua y elementos deformes. Aplica a todos los proveedores de imagen sin
+#: cambiar su contrato.
 SCENE_PROMPT_TEMPLATE: str = (
     "Escena {index} del Short: {description}. "
-    "Composición vertical 9:16 para YouTube Shorts, encuadre cercano, "
-    "iluminación clara, alta calidad y detalle."
+    "Composición vertical 9:16 para YouTube Shorts, fotorrealista, altamente "
+    "detallado, con coherencia visual con las demás escenas. Sin texto, sin "
+    "logotipos, sin marcas de agua, sin elementos deformes o distorsionados."
 )
 
 #: Descripción usada cuando la escena no tiene texto.

@@ -65,6 +65,11 @@ class FFmpegExecutor:
     ) -> RenderResult:
         """Ejecuta el comando y devuelve un :class:`RenderResult`.
 
+        El comando se ejecuta siempre en modo no interactivo: si no incluye ya
+        la opción global ``-y``, se inserta tras el ejecutable para que FFmpeg
+        sobrescriba la salida sin pedir confirmación (un render repetido no
+        debe bloquearse). ``shell=False`` se mantiene en todo caso.
+
         Args:
             command: comando FFmpeg a ejecutar (su ``executable`` es la fuente
                 de verdad del binario a invocar).
@@ -95,6 +100,8 @@ class FFmpegExecutor:
         resolved_duration = duration_seconds if duration_seconds is not None else 0.0
 
         argv = command.to_argv()
+        if "-y" not in argv:
+            argv = [argv[0], "-y", *argv[1:]]
         timeout = self.timeout_seconds
 
         try:

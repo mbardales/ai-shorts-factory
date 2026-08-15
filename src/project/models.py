@@ -26,6 +26,7 @@ Convención de rutas: las rutas de los activos (``path``) y del archivo de salid
 from __future__ import annotations
 
 import enum
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,6 +153,89 @@ def _estimate_duration(package: Mapping[str, Any]) -> float:
         if isinstance(timing, (int, float)) and not isinstance(timing, bool):
             total += float(timing)
     return total
+
+
+#: Tolerancia (segundos) para comparar duraciones en punto flotante.
+TIMING_TOLERANCE = 1e-6
+
+
+def rescale_scene_timings(
+    package: Mapping[str, Any],
+    target_duration: float,
+    *,
+    tolerance: float = TIMING_TOLERANCE,
+    integer: bool = False,
+) -> dict[str, Any]:
+    """Ajusta la temporización de las escenas para cubrir una duración objetivo.
+
+    Cuando la suma de los ``timing_seconds`` de las escenas es menor que
+    ``target_duration`` (por ejemplo, la narración real dura más que el
+    timeline estimado), escala cada escena proporcionalmente por
+    ``target_duration / suma`` y ajusta la última escena temporizada para que la
+    nueva suma coincida exactamente con el objetivo (evita desfases
+    acumulativos por punto flotante).
+
+    Mantiene el número de escenas, su orden y el resto del contenido; solo
+    modifica ``visuals.scenes[*].timing_seconds``.
+
+    Con ``integer=True`` se devuelven temporizaciones enteras (necesario para
+    mantener el contrato del ContentPackage, cuyo ``timing_seconds`` es
+    ``integer``): se truncan las escalas y se distribuye el resto a las escenas
+    con mayor parte fraccionaria, sin superar ``floor(target_duration)``.
+
+    Args:
+        package: dict del ContentPackage.
+        target_duration: duración objetivo en segundos (positiva).
+        tolerance: tolerancia de comparación en punto flotante.
+        integer: si es ``True``, las temporizaciones resultantes son enteras.
+
+    Returns:
+        Copia profunda del package con las escenas re-temporizadas. Si la suma
+        ya cubre la duración objetivo (o no hay escenas con temporización
+        positiva), devuelve una copia sin cambios: se conserva el
+        comportamiento existente.
+    """
+    result = deepcopy(dict(package))
+    visuals = result.get("visuals")
+    scenes = visuals.get("scenes") if isinstance(visuals, dict) else None
+    if not isinstance(scenes, list):
+        return result
+
+    timed: list[tuple[int, float]] = []
+    for index, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            continue
+        timing = scene.get("timing_seconds")
+        if isinstance(timing, (int, float)) and not isinstance(timing, bool):
+            if timing > 0:
+                timed.append((index, float(timing)))
+
+    total = sum(value for _, value in timed)
+    if not timed or total <= 0:
+        return result
+    if target_duration <= total + tolerance:
+        return result
+
+    factor = target_duration / total
+    if integer:
+        scaled = [(index, value * factor) for index, value in timed]
+        floors = {index: int(scaled_value) for index, scaled_value in scaled}
+        remaining = int(target_duration) - sum(floors.values())
+        if remaining > 0:
+            ordered = sorted(scaled, key=lambda item: -(item[1] - int(item[1])))
+            for index, _ in ordered[:remaining]:
+                floors[index] += 1
+        for index, _ in timed:
+            scenes[index]["timing_seconds"] = floors[index]
+        return result
+
+    for index, value in timed:
+        scenes[index]["timing_seconds"] = value * factor
+
+    last_index, _ = timed[-1]
+    new_total = sum(float(scenes[index]["timing_seconds"]) for index, _ in timed)
+    scenes[last_index]["timing_seconds"] += target_duration - new_total
+    return result
 
 
 def build_project_manifest(

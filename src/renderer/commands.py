@@ -146,6 +146,8 @@ def _build_composed_arguments(
     durations: Sequence[Optional[float]],
     fps: int,
     audio_codec: Optional[str] = None,
+    subtitles: Optional[str] = None,
+    transition_fade_seconds: float = 0.0,
 ) -> list[str]:
     """Construye los argumentos de un comando FFmpeg con composición de imágenes.
 
@@ -153,6 +155,15 @@ def _build_composed_arguments(
     ``-loop 1 -t <dur>`` y todos los segmentos se concatenan en orden mediante
     ``filter_complex`` + ``concat``. Las entradas sin duración (p. ej. audio)
     se conservan como inputs simples.
+
+    Transiciones (opcional): si ``transition_fade_seconds`` es positivo, cada
+    segmento se funde a negro al inicio y al final (``fade``), lo que produce
+    una transición sencilla entre escenas **sin alterar la duración total** del
+    video (a diferencia de ``xfade``). El coste de render es despreciable.
+
+    Subtítulos (opcional): si ``subtitles`` es una ruta a un archivo ASS, se
+    superpone al video compuesto con el filtro ``ass`` (libass); la ruta se
+    interpreta relativa al directorio de trabajo de FFmpeg.
 
     Si existen entradas sin duración (pistas de audio), se mapean como salida
     adicional usando su índice real de input, se codifican con
@@ -165,6 +176,7 @@ def _build_composed_arguments(
     arguments: list[str] = []
     input_index = 0
     filter_labels: list[str] = []
+    image_specs: list[tuple[int, float]] = []
     audio_indices: list[int] = []
     for item, duration in zip(inputs, durations):
         if duration is None:
@@ -172,6 +184,7 @@ def _build_composed_arguments(
             audio_indices.append(input_index)
             input_index += 1
             continue
+        resolved_duration = float(duration)
         arguments.extend(
             (
                 "-loop",
@@ -179,21 +192,46 @@ def _build_composed_arguments(
                 "-framerate",
                 str(fps),
                 "-t",
-                _format_duration(float(duration)),
+                _format_duration(resolved_duration),
                 "-i",
                 str(item.path),
             )
         )
         filter_labels.append(f"[{input_index}:v]")
+        image_specs.append((input_index, resolved_duration))
         input_index += 1
 
-    concat_inputs = "".join(filter_labels)
+    filter_complex_parts: list[str] = []
+    concat_labels: list[str] = filter_labels
+    if transition_fade_seconds > 0 and image_specs:
+        fade = _format_duration(float(transition_fade_seconds))
+        concat_labels = []
+        for index, (image_index, duration) in enumerate(image_specs):
+            chain = [f"fade=t=in:st=0:d={fade}"]
+            if duration > transition_fade_seconds + 0.05:
+                fade_out_st = _format_duration(duration - transition_fade_seconds)
+                chain.append(f"fade=t=out:st={fade_out_st}:d={fade}")
+            label = f"[s{index}v]"
+            filter_complex_parts.append(
+                f"[{image_index}:v]{','.join(chain)}{label}"
+            )
+            concat_labels.append(label)
+
+    concat_inputs = "".join(concat_labels)
+    filter_complex = f"{concat_inputs}concat=n={len(concat_labels)}:v=1:a=0[outv]"
+    if filter_complex_parts:
+        filter_complex = ";".join(filter_complex_parts) + ";" + filter_complex
+    video_map = "[outv]"
+    if subtitles:
+        filter_complex += f";[outv]ass=filename={subtitles}[outv_sub]"
+        video_map = "[outv_sub]"
+
     arguments.extend(
         (
             "-filter_complex",
-            f"{concat_inputs}concat=n={len(filter_labels)}:v=1:a=0[outv]",
+            filter_complex,
             "-map",
-            "[outv]",
+            video_map,
             "-c:v",
             DEFAULT_VIDEO_CODEC,
             "-pix_fmt",
@@ -219,6 +257,8 @@ def build_ffmpeg_command(
     durations: Optional[Sequence[Optional[float]]] = None,
     fps: Optional[int] = None,
     audio_codec: Optional[str] = None,
+    subtitles: Optional[str] = None,
+    transition_fade_seconds: float = 0.0,
 ) -> FFmpegCommand:
     """Construye un :class:`FFmpegCommand` de forma determinista.
 
@@ -250,6 +290,10 @@ def build_ffmpeg_command(
         fps: fotogramas por segundo de la composición (por defecto 25).
         audio_codec: códec de audio de salida (por defecto
             ``DEFAULT_AUDIO_CODEC``) cuando hay pistas de audio.
+        subtitles: ruta (relativa al directorio de trabajo de FFmpeg) de un
+            archivo ASS a superponer al video con el filtro ``ass``; opcional.
+        transition_fade_seconds: duración del fundido (``fade``) entre escenas
+            en segundos; ``0`` desactiva las transiciones.
 
     Returns:
         :class:`FFmpegCommand` con los argumentos construidos.
@@ -259,6 +303,15 @@ def build_ffmpeg_command(
             válido.
     """
     errors = _validate_command_args(inputs, output, options, executable)
+    if subtitles is not None:
+        if not isinstance(subtitles, str) or not subtitles.strip():
+            errors.append("'subtitles' debe ser una ruta no vacía.")
+    if not isinstance(transition_fade_seconds, (int, float)) or isinstance(
+        transition_fade_seconds, bool
+    ):
+        errors.append("'transition_fade_seconds' debe ser un número.")
+    elif transition_fade_seconds < 0:
+        errors.append("'transition_fade_seconds' no puede ser negativo.")
     if durations is not None:
         if not isinstance(durations, Sequence) or isinstance(durations, (str, bytes)):
             errors.append("'durations' debe ser una secuencia.")
@@ -294,6 +347,8 @@ def build_ffmpeg_command(
                 durations=durations,  # type: ignore[arg-type]
                 fps=resolved_fps,
                 audio_codec=audio_codec,
+                subtitles=subtitles,
+                transition_fade_seconds=float(transition_fade_seconds or 0),
             )
         )
     else:

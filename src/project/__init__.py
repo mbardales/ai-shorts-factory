@@ -41,6 +41,7 @@ from .models import (
     ProjectManifest,
     ProjectMetadata,
     build_project_manifest,
+    rescale_scene_timings,
 )
 from .validator import (
     coerce_project_manifest,
@@ -61,6 +62,7 @@ __all__ = [
     "ProjectManifest",
     "ProjectMetadata",
     "build_project_manifest",
+    "rescale_scene_timings",
     "ProjectError",
     "ProjectNotFoundError",
     "ProjectValidationError",

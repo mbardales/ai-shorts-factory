@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Shorts Factory</title>
+  <meta name="description" content="Generador de YouTube Shorts asistido por IA.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <svg class="brand-logo" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#4f8cff"></stop>
+            <stop offset="1" stop-color="#22d3a5"></stop>
+          </linearGradient>
+        </defs>
+        <rect x="2" y="6" width="36" height="28" rx="8" fill="url(#brand-grad)"></rect>
+        <path d="M16 13l10 7-10 7z" fill="#fff"></path>
+      </svg>
+      <span class="brand-name">AI Shorts Factory</span>
+      <span class="brand-badge">Demo</span>
+    </div>
+    <h1 class="hero-title">Crea un Short en segundos</h1>
+    <p class="subtitle">Escribe un tema y el pipeline genera el guion, las imágenes,
+      la narración y el video final.</p>
+  </header>
+
+  <main class="layout">
+    <section class="card form-card" aria-labelledby="form-title">
+      <h2 id="form-title" class="card-title">Nuevo Short</h2>
+
+      <form id="create-form" novalidate>
+        <div class="field">
+          <label for="topic">Tema</label>
+          <textarea id="topic" name="topic" rows="3"
+            placeholder="Ej.: Un eclipse solar total"
+            required aria-describedby="topic-hint"></textarea>
+          <p id="topic-hint" class="hint">Describe el contenido del Short en una o dos frases.</p>
+        </div>
+
+        <div class="field">
+          <label for="project-select">Proyecto</label>
+          <select id="project-select" name="project">
+            <option value="">Sin proyecto</option>
+          </select>
+          <p id="project-active" class="hint" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="new-project-name">Crear proyecto</label>
+          <div class="project-create">
+            <input id="new-project-name" name="new-project-name" type="text"
+              placeholder="Nombre del proyecto" aria-label="Nombre del proyecto">
+            <button type="button" id="create-project" class="btn btn-secondary">Crear</button>
+          </div>
+          <p id="project-feedback" class="hint" hidden role="status"></p>
+        </div>
+
+        <div class="field field-inline">
+          <input type="checkbox" id="offline" name="offline" checked>
+          <label for="offline" class="inline-label">Modo offline (proveedores sintéticos)</label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" id="generate" class="btn btn-primary btn-lg">
+            <span id="generate-label">Crear Short</span>
+            <span id="generate-spinner" class="spinner" hidden aria-hidden="true"></span>
+          </button>
+          <button type="button" id="reset" class="btn btn-secondary" hidden>Generar otro</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card status-card" aria-labelledby="status-title" hidden id="status-card">
+      <h2 id="status-title" class="card-title">Progreso</h2>
+      <p id="status" class="status-text" role="status" aria-live="polite">Preparando…</p>
+
+      <ol id="stage-list" class="stage-list" aria-label="Etapas de generación">
+        <li data-stage="content" class="stage-item">Contenido</li>
+        <li data-stage="image" class="stage-item">Imágenes</li>
+        <li data-stage="audio" class="stage-item">Audio</li>
+        <li data-stage="manifest" class="stage-item">Manifest</li>
+        <li data-stage="render" class="stage-item">Render</li>
+        <li data-stage="quality" class="stage-item">Calidad</li>
+      </ol>
+
+      <div id="progress" class="progress" role="progressbar" aria-label="Generando Short"
+        aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-busy="true">
+        <div class="progress-bar"></div>
+      </div>
+
+      <p class="run-meta">
+        <span id="run-label" class="run-label" hidden></span>
+        <span id="elapsed-label" class="run-label" hidden></span>
+      </p>
+    </section>
+
+    <section class="card result-card" aria-labelledby="result-title" hidden id="result-card">
+      <h2 id="result-title" class="card-title">Short listo</h2>
+      <p id="quality-warning" class="quality-warning" hidden role="alert"></p>
+      <video id="video" class="video" controls preload="metadata" playsinline></video>
+      <div class="actions">
+        <a id="download" class="btn btn-primary" href="#" download>Descargar MP4</a>
+      </div>
+    </section>
+
+    <section class="card error-card" aria-labelledby="error-title" hidden id="error-card">
+      <h2 id="error-title" class="card-title">Error</h2>
+      <p id="error-message" class="error-text" role="alert"></p>
+    </section>
+
+    <section class="card history-card" id="history-card" aria-labelledby="history-title">
+      <div class="history-head">
+        <h2 id="history-title" class="card-title">Mis Shorts</h2>
+        <div class="history-tools">
+          <label for="history-filter" class="sr-only">Filtrar historial por proyecto</label>
+          <select id="history-filter" name="history-filter" aria-label="Filtrar historial por proyecto">
+            <option value="">Todos los proyectos</option>
+            <option value="none">Sin proyecto</option>
+          </select>
+          <button type="button" id="refresh-history" class="btn btn-secondary btn-sm"
+            aria-label="Actualizar historial">
+            <span id="refresh-label">Actualizar</span>
+            <span id="refresh-spinner" class="spinner spinner-sm" hidden aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+      <div id="history-empty" class="empty-state" hidden>
+        <svg class="empty-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+          <circle cx="24" cy="24" r="20" fill="#10141c" stroke="#262e3d" stroke-width="2"></circle>
+          <path d="M20 17l12 7-12 7z" fill="#4f8cff"></path>
+          <circle cx="24" cy="24" r="3" fill="#22d3a5"></circle>
+        </svg>
+        <p class="empty-title">Aún no hay Shorts</p>
+        <p class="hint">Crea tu primer Short y aparecerá aquí.</p>
+      </div>
+      <div id="history-list" class="history-list" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>API: <code id="api-base">http://127.0.0.1:8000</code> &middot; Sin dependencias externas</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

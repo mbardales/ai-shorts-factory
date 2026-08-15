@@ -83,9 +83,15 @@ Detalle del flujo de datos previsto y ampliado: [DATA_FLOW.md](DATA_FLOW.md).
 
 | Área | Providers | Selección |
 |---|---|---|
-| Texto | `gemini` | `GEMINI_MODEL` |
+| Texto | `gemini` | `GEMINI_CONTENT_PROVIDER` (default `gemini`); `GEMINI_MODEL` |
 | Imágenes | `gemini`, `stability`, `synthetic` | `GEMINI_IMAGE_PROVIDER`; fallback `GEMINI_IMAGE_FALLBACK_PROVIDER` |
 | Audio | `gemini`, `synthetic` | `GEMINI_AUDIO_PROVIDER` |
+
+- Selección por **variables de entorno** (canónica en `scripts/.env.example`);
+  un valor vacío usa el predeterminado del código.
+- `synthetic` (texto/imagen/audio) es el provider **offline** determinista;
+  `stability` es la **alternativa real** de imagen.
+- `config/providers.json` es **legacy**: no lo usa el pipeline actual.
 
 El pipeline completo es ejecutable **offline** con los providers `synthetic`
 (imagen + audio) + FFmpeg, sin API keys ni HTTP.

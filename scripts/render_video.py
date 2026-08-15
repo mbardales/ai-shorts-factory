@@ -46,6 +46,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from project import (  # noqa: E402
+    AssetKind,
     ProjectError,
     ProjectNotFoundError,
     ProjectValidationError,
@@ -56,9 +57,11 @@ from renderer import (  # noqa: E402
     FFmpegExecutor,
     RendererError,
     RendererValidationError,
+    build_ass_subtitles,
     build_project_ffmpeg_command,
     build_render_request,
 )
+from renderer.alignment import WordTiming, align_word_timings
 
 logger = logging.getLogger("render_video")
 
@@ -80,6 +83,12 @@ FFMPEG_TIMEOUT_SECONDS = 60
 
 #: Timeout de la inspección con ffprobe.
 PROBE_TIMEOUT_SECONDS = 30
+
+#: Nombre del archivo de subtítulos ASS generado dentro del run.
+SUBTITLES_FILENAME = "subtitles.ass"
+
+#: Duración del fundido (``fade``) entre escenas en segundos.
+TRANSITION_FADE_SECONDS = 0.3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -186,6 +195,133 @@ def describe_output(path: Path) -> None:
     logger.info("Duración real: %.2f s", duration)
 
 
+def _audio_asset_path(manifest: object) -> Optional[str]:
+    """Devuelve la ruta del primer activo de audio del manifest (o ``None``)."""
+    for asset in getattr(manifest, "assets", ()):
+        if getattr(asset, "kind", None) == AssetKind.AUDIO:
+            return getattr(asset, "path", None)
+    return None
+
+
+def _measure_audio_duration(path: Path) -> Optional[float]:
+    """Mide la duración real de una pista de audio en segundos.
+
+    Usa el módulo estándar ``wave`` para WAV (sin subprocess) y ffprobe como
+    respaldo para otros formatos. Devuelve ``None`` si no se puede medir.
+    """
+    if path.suffix.lower() == ".wav":
+        try:
+            import wave
+
+            with wave.open(str(path), "rb") as handle:
+                frames = handle.getnframes()
+                rate = handle.getframerate()
+                if rate and frames:
+                    return frames / rate
+        except (OSError, EOFError, wave.Error) as exc:
+            logger.warning("No se pudo medir la duración del WAV %s: %s", path, exc)
+        return None
+    ffprobe = shutil.which("ffprobe") or "ffprobe"
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("No se pudo medir la duración del audio con ffprobe: %s", exc)
+        return None
+    if completed.returncode != 0:
+        logger.warning(
+            "ffprobe no pudo medir la duración del audio: %s",
+            (completed.stderr or "").strip(),
+        )
+        return None
+    try:
+        value = (completed.stdout or "").strip()
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
+def _build_subtitles_file(manifest: object, base_dir: Path) -> Optional[str]:
+    """Genera el archivo ASS de subtítulos dentro del run.
+
+    Deriva los subtítulos del texto de la narración embebido en el manifest
+    (``content.narration.text``) y los temporiza con la duración real del audio.
+    Escribe el archivo en ``base_dir`` (directorio del manifest) y devuelve su
+    nombre relativo, o ``None`` si no hay narración/audio suficientes.
+
+    El fallo en la generación no debe bloquear el render: el consumidor decide
+    qué hacer si devuelve ``None``.
+    """
+    content = getattr(manifest, "content", None)
+    if not isinstance(content, dict):
+        return None
+    narration = content.get("narration")
+    text = narration.get("text") if isinstance(narration, dict) else None
+    text = (text or "").strip()
+    if not text:
+        logger.info("Sin narración en el manifest; no se generan subtítulos.")
+        return None
+
+    duration: Optional[float] = None
+    audio_path = _audio_asset_path(manifest)
+    if audio_path:
+        duration = _measure_audio_duration(base_dir / audio_path)
+    if duration is None or duration <= 0:
+        estimated = getattr(manifest, "estimated_duration_seconds", None)
+        duration = float(estimated) if estimated else 0.0
+    if duration <= 0:
+        logger.warning(
+            "Sin duración de referencia; no se generan subtítulos para %s.",
+            audio_path,
+        )
+        return None
+
+    word_timings: Optional[list[WordTiming]] = None
+    if audio_path:
+        audio_file = base_dir / audio_path
+        if audio_file.is_file() and audio_file.suffix.lower() == ".wav":
+            try:
+                word_timings = align_word_timings(text, audio_file.read_bytes())
+            except Exception as exc:  # noqa: BLE001 - nunca debe bloquear el render
+                logger.warning(
+                    "No se pudo alinear subtítulos palabra a palabra; se usa "
+                    "temporización proporcional: %s",
+                    exc,
+                )
+                word_timings = None
+    if word_timings:
+        logger.info(
+            "Subtítulos alineados a %d palabras (audio real).",
+            len(word_timings),
+        )
+
+    subtitle_path = base_dir / SUBTITLES_FILENAME
+    subtitle_path.write_text(
+        build_ass_subtitles(text, duration, word_timings),
+        encoding="utf-8",
+    )
+    logger.info(
+        "Subtítulos generados: %s (duración de referencia %.2f s)",
+        subtitle_path,
+        duration,
+    )
+    return SUBTITLES_FILENAME
+
+
 def render_video_to_path(manifest_path: Path) -> int:
     """Renderiza el video de un proyecto desde la ruta de su manifest.
 
@@ -227,7 +363,17 @@ def render_video_to_path(manifest_path: Path) -> int:
 
     try:
         request = build_render_request(manifest)
-        command = build_project_ffmpeg_command(request, options=FFMPEG_OPTIONS)
+        try:
+            subtitles = _build_subtitles_file(manifest, base_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No se pudieron generar subtítulos: %s", exc)
+            subtitles = None
+        command = build_project_ffmpeg_command(
+            request,
+            options=FFMPEG_OPTIONS,
+            subtitles=subtitles,
+            transition_fade_seconds=TRANSITION_FADE_SECONDS,
+        )
     except RendererValidationError as exc:
         logger.error("No se pudo construir el comando de render: %s", exc)
         return EXIT_GENERAL

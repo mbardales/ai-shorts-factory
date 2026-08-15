@@ -8,8 +8,9 @@ Flujo:
    escena con :func:`image.build_scene_prompts`.
 3. Genera una imagen por escena mediante el :class:`image.ImageAdapter`
    envuelto sobre el proveedor seleccionado con la variable de entorno
-   ``GEMINI_IMAGE_PROVIDER`` (``gemini`` por defecto, ``stability`` o
-   ``synthetic``). Opcionalmente, si ``GEMINI_IMAGE_FALLBACK_PROVIDER`` define
+   ``GEMINI_IMAGE_PROVIDER`` (``gemini`` por defecto, ``stability``,
+   ``synthetic`` o ``local-sd15``). Opcionalmente, si
+   ``GEMINI_IMAGE_FALLBACK_PROVIDER`` define
    un proveedor distinto, se habilita UN fallback POR EJECUCIÓN: si el primario
    falla con un error recuperable (429, timeout, red, 5xx, respuesta vacía), el
    resto de escenas (incluida la fallida) se generan con el fallback. El
@@ -65,6 +66,7 @@ from image.exceptions import ImageError, ImageProviderError  # noqa: E402
 from image.fallback import make_generate_with_fallback  # noqa: E402
 from image.providers import (  # noqa: E402
     GeminiImageProvider,
+    LocalSD15ImageProvider,
     StabilityImageProvider,
     SyntheticImageProvider,
 )
@@ -80,8 +82,10 @@ OUTPUT_IMAGES_DIR = ROOT / "output" / "images"
 DEFAULT_IMAGE_MODEL = "imagen-3.0-generate-002"
 #: Proveedor de imágenes por defecto si no hay variable de entorno.
 DEFAULT_IMAGE_PROVIDER = "gemini"
+#: Modelo de Stable Diffusion 1.5 local por defecto.
+DEFAULT_LOCAL_SD15_MODEL = "runwayml/stable-diffusion-v1-5"
 #: Valores admitidos para ``GEMINI_IMAGE_PROVIDER``.
-SUPPORTED_IMAGE_PROVIDERS = ("gemini", "stability", "synthetic")
+SUPPORTED_IMAGE_PROVIDERS = ("gemini", "stability", "synthetic", "local-sd15")
 #: Extensión de las imágenes de salida (formato Imagen, PNG).
 IMAGE_EXTENSION = "png"
 
@@ -107,6 +111,11 @@ def resolve_image_provider() -> str:
     return provider or DEFAULT_IMAGE_PROVIDER
 
 
+def resolve_local_sd15_model() -> str:
+    """Devuelve el modelo de SD 1.5 local (env ``LOCAL_SD15_MODEL`` o default)."""
+    return os.environ.get("LOCAL_SD15_MODEL", "").strip() or DEFAULT_LOCAL_SD15_MODEL
+
+
 def resolve_image_fallback_provider() -> str:
     """Devuelve el proveedor de fallback configurado (env) o cadena vacía.
 
@@ -121,9 +130,9 @@ def build_image_provider(provider: str | None = None) -> ImageProvider:
     """Construye el proveedor de imágenes según el nombre indicado.
 
     Args:
-        provider: nombre del proveedor (``gemini``, ``stability`` o
-            ``synthetic``). Si es ``None`` se usa el resuelto por
-            :func:`resolve_image_provider`.
+        provider: nombre del proveedor (``gemini``, ``stability``,
+            ``synthetic`` o ``local-sd15``). Si es ``None`` se usa el resuelto
+            por :func:`resolve_image_provider`.
 
     Returns:
         Instancia concreta del proveedor seleccionado.
@@ -140,6 +149,8 @@ def build_image_provider(provider: str | None = None) -> ImageProvider:
         return StabilityImageProvider(model=resolve_image_model())
     if provider == "synthetic":
         return SyntheticImageProvider()
+    if provider == "local-sd15":
+        return LocalSD15ImageProvider(model=resolve_local_sd15_model())
     raise ImageProviderError(
         f"Proveedor de imágenes no soportado: {provider!r}. "
         f"Valores válidos: {', '.join(SUPPORTED_IMAGE_PROVIDERS)}."

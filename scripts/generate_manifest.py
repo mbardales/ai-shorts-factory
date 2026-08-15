@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
 import sys
+import wave
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -37,11 +40,14 @@ from content import (  # noqa: E402
     ContentValidationError,
     content_package_from_json,
     content_package_to_dict,
+    content_package_to_json,
+    coerce_content_package,
 )
 from project import (  # noqa: E402
     ProjectValidationError,
     build_project_manifest,
     project_manifest_to_json,
+    rescale_scene_timings,
     validate_project_manifest,
 )
 
@@ -132,6 +138,69 @@ def detect_assets(
     return sorted(found)
 
 
+def sum_scene_timing(package: Mapping[str, Any]) -> float:
+    """Suma los ``timing_seconds`` positivos de las escenas del ContentPackage."""
+    visuals = package.get("visuals")
+    scenes = visuals.get("scenes") if isinstance(visuals, Mapping) else None
+    if not isinstance(scenes, (list, tuple)):
+        return 0.0
+    total = 0.0
+    for scene in scenes:
+        if not isinstance(scene, Mapping):
+            continue
+        timing = scene.get("timing_seconds")
+        if isinstance(timing, (int, float)) and not isinstance(timing, bool):
+            if timing > 0:
+                total += float(timing)
+    return total
+
+
+def audio_real_duration(path: Path) -> float | None:
+    """Duración real de una pista de audio (WAV vía ``wave``; resto por ffprobe).
+
+    Devuelve ``None`` si no se puede medir (archivo ausente, tool ausente,
+    timeout o formato ilegible). Nunca lanza.
+    """
+    if not path.is_file():
+        return None
+    extension = path.suffix.lower().lstrip(".")
+    if extension == "wav":
+        try:
+            with wave.open(str(path), "rb") as wav:
+                rate = wav.getframerate()
+                frames = wav.getnframes()
+        except (wave.Error, OSError, ValueError) as exc:
+            logger.warning("No se pudo medir la duración WAV de %s: %s", path, exc)
+            return None
+        return frames / rate if rate else None
+    executable = shutil.which("ffprobe") or "ffprobe"
+    try:
+        completed = subprocess.run(
+            [executable, "-v", "error", "-show_format", "-of", "json", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("No se pudo medir la duración de %s: %s", path, exc)
+        return None
+    if completed.returncode != 0:
+        logger.debug("ffprobe devolvió %d para %s.", completed.returncode, path)
+        return None
+    try:
+        data = json.loads(completed.stdout or "{}")
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return float(data["format"]["duration"])
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.debug("Sin duración medible para %s: %s", path, exc)
+        return None
+
+
 def generate_manifest_to_path(
     output_dir: Path,
     *,
@@ -168,8 +237,47 @@ def generate_manifest_to_path(
     audio_paths = detect_assets(audio_dir, AUDIO_EXTENSIONS, base_dir=output_dir)
     image_providers = load_image_providers(images_dir / "providers.json")
 
+    package_dict = content_package_to_dict(package)
+
+    # Sincroniza el timeline con la narración real: si el audio dura más que la
+    # suma de timing_seconds, extiende las escenas proporcionalmente para que el
+    # render (y el Quality Gate) vean una duración coherente con el audio.
+    #
+    # El manifest embebe la temporización en punto flotante (fuente del
+    # renderer); content.json conserva su contrato de enteros (fuente del
+    # Quality Gate), por lo que ambos se actualizan con la misma corrección.
+    if len(audio_paths) == 1:
+        real_duration = audio_real_duration(output_dir / audio_paths[0])
+        if real_duration is not None and real_duration > 0:
+            sum_timing = sum_scene_timing(package_dict)
+            if real_duration > sum_timing + 1e-6:
+                content_float = rescale_scene_timings(package_dict, real_duration)
+                content_int = rescale_scene_timings(
+                    package_dict, real_duration, integer=True
+                )
+                package_dict = content_float
+                content_path.write_text(
+                    content_package_to_json(coerce_content_package(content_int)),
+                    encoding="utf-8",
+                )
+                logger.info(
+                    "Timeline ajustado al audio real (%.2fs): suma timing %.2fs; "
+                    "las escenas se extendieron proporcionalmente (factor %.3f). "
+                    "content.json y manifest re-temporizados.",
+                    real_duration,
+                    sum_timing,
+                    real_duration / sum_timing,
+                )
+            else:
+                logger.debug(
+                    "El audio real (%.2fs) no supera la suma timing (%.2fs): "
+                    "sin ajuste.",
+                    real_duration,
+                    sum_timing,
+                )
+
     manifest = build_project_manifest(
-        content_package_to_dict(package),
+        package_dict,
         image_paths,
         audio_paths,
         content_file="content.json",

@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .exceptions import PipelineNotFoundError, PipelineValidationError
+from .models import _utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +206,10 @@ class RunContext:
     def prepare(self) -> RunDirectory:
         """Crea (si no existen) los directorios de la ejecución.
 
-        Crea de forma **implícita** ``run_dir/input`` y ``run_dir/output``.
-        Idempotente: si ya existen, no hace nada.
+        Crea de forma **implícita** ``run_dir/input`` y ``run_dir/output`` y
+        escribe el estado ``RUNNING`` del run en ``run_dir/run.json`` (escritura
+        atómica, idempotente: en un re-run conserva el ``created_at`` original).
+        Idempotente: si los directorios ya existen, no los recrea.
 
         Returns:
             El :class:`RunDirectory` ya preparado (los directorios existen).
@@ -216,7 +219,24 @@ class RunContext:
             if not path.exists():
                 logger.info("Creando directorio de ejecución: %s", path)
                 path.mkdir(parents=True, exist_ok=True)
+        self._mark_running(directory.run_dir)
         return directory
+
+    def _mark_running(self, run_dir: Path) -> None:
+        """Escribe (o actualiza) el estado del run a ``RUNNING``."""
+        from .lifecycle import RunRecord, RunStatus, load_run_record, write_run_record
+
+        previous = load_run_record(run_dir)
+        now = _utc_now()
+        write_run_record(
+            run_dir,
+            RunRecord(
+                run_id=self.run_id,
+                status=RunStatus.RUNNING,
+                created_at=previous.created_at if previous else now,
+                started_at=now,
+            ),
+        )
 
     @classmethod
     def create(cls, *, now: datetime | None = None) -> "RunContext":

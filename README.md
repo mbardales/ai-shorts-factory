@@ -65,11 +65,18 @@ FAIL para diagnóstico.
 
 ## Providers
 
+Los providers se seleccionan mediante **variables de entorno** (documentación
+canónica en `scripts/.env.example`); un valor vacío usa el predeterminado del
+código. `config/providers.json` es **legacy**: contiene placeholders y el
+pipeline actual no lo utiliza. Las claves de API (`GEMINI_API_KEY`,
+`STABILITY_API_KEY`) nunca se documentan con valores reales; solo viven en el
+`.env` local.
+
 | Área | Providers | Selección |
 |---|---|---|
-| Texto | `gemini` | `GEMINI_MODEL` (default `gemini-3.6-flash`) |
-| Imágenes | `gemini`, `stability`, `synthetic` | `GEMINI_IMAGE_PROVIDER` (default `gemini`); fallback opcional `GEMINI_IMAGE_FALLBACK_PROVIDER` |
-| Audio | `gemini`, `synthetic` | `GEMINI_AUDIO_PROVIDER` (default `gemini`) |
+| Texto | `gemini` | `GEMINI_CONTENT_PROVIDER` (default `gemini`); `GEMINI_MODEL` (default `gemini-3.6-flash`) |
+| Imágenes | `gemini`, `stability`, `synthetic` | `GEMINI_IMAGE_PROVIDER` (default `gemini`); `synthetic` = offline determinista; `stability` = alternativa real; fallback opcional `GEMINI_IMAGE_FALLBACK_PROVIDER` |
+| Audio | `gemini`, `synthetic` | `GEMINI_AUDIO_PROVIDER` (default `gemini`); `synthetic` = offline determinista |
 
 ## Ejecución rápida
 

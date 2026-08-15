@@ -25,6 +25,17 @@ from .exceptions import (
     PipelineNotFoundError,
     PipelineValidationError,
 )
+from .lifecycle import (
+    RUN_FILE,
+    RunRecord,
+    RunStatus,
+    checked_run_dir,
+    find_cleanup_candidates,
+    list_runs,
+    load_run_record,
+    unknown_record,
+    write_run_record,
+)
 from .models import PipelineResult, StageResult
 from .runner import STAGE_ORDER, PipelineRunner
 
@@ -44,4 +55,13 @@ __all__ = [
     "StageResult",
     "PipelineRunner",
     "STAGE_ORDER",
+    "RUN_FILE",
+    "RunRecord",
+    "RunStatus",
+    "checked_run_dir",
+    "find_cleanup_candidates",
+    "list_runs",
+    "load_run_record",
+    "unknown_record",
+    "write_run_record",
 ]

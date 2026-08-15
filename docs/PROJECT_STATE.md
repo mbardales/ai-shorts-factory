@@ -80,10 +80,17 @@ del run (incluido el video renderizado) para diagnóstico.
 
 | Área | Providers | Selección |
 |---|---|---|
-| Texto | `gemini` | `GEMINI_MODEL` (default `gemini-3.6-flash`) |
+| Texto | `gemini` | `GEMINI_CONTENT_PROVIDER` (default `gemini`); `GEMINI_MODEL` (default `gemini-3.6-flash`) |
 | Imágenes | `gemini` \| `stability` \| `synthetic` | `GEMINI_IMAGE_PROVIDER`; fallback opcional `GEMINI_IMAGE_FALLBACK_PROVIDER` |
 | Audio | `gemini` \| `synthetic` | `GEMINI_AUDIO_PROVIDER` |
 
+- Los providers se seleccionan **mediante variables de entorno** (documentación
+  canónica en `scripts/.env.example`); un valor vacío usa el predeterminado del
+  código.
+- `synthetic` es el provider **offline** (determinista, sin API key ni HTTP);
+  `stability` es la **alternativa real** de imagen (requiere `STABILITY_API_KEY`).
+- `config/providers.json` es **legacy**: contiene placeholders y el pipeline
+  actual no lo utiliza para seleccionar providers.
 - El pipeline completo funciona **offline y determinista** con
   `synthetic` (imagen + audio) + FFmpeg. Validado end-to-end.
 - `SyntheticImageProvider` nunca se activa automáticamente como fallback; el

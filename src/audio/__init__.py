@@ -8,15 +8,15 @@ siguiendo el mismo patrón que ``ai``, ``media`` e ``image``:
 - ``models``: narración y solicitudes de síntesis derivadas del ContentPackage.
 - ``adapter``: ``AudioAdapter``, orquestador desacoplado del proveedor.
 - ``exceptions``: jerarquía de excepciones propia.
+- ``providers``: implementaciones concretas (``google``, ``synthetic``,
+  ``kokoro``).
 
-No se implementa ningún proveedor concreto todavía (``audio/providers/`` no
-existe) ni se llaman APIs de TTS.
-
-Uso típico (una vez exista un proveedor):
+Uso típico:
 
     from audio import AudioAdapter, AudioRequest
+    from audio.providers import SyntheticAudioProvider
 
-    adapter = AudioAdapter(SomeTTSProvider(model="..."))
+    adapter = AudioAdapter(SyntheticAudioProvider(model="synthetic-v1"))
     resultado = adapter.generate(AudioRequest(text="Hola"))
 """
 
@@ -30,6 +30,7 @@ from .exceptions import (
 )
 from .models import AudioNarration, NarrationSource, SpeechPrompt
 from .adapter import AudioAdapter
+from .providers import GoogleTTSProvider, KokoroAudioProvider, SyntheticAudioProvider
 
 __all__ = [
     "AudioFormat",
@@ -44,4 +45,7 @@ __all__ = [
     "NarrationSource",
     "SpeechPrompt",
     "AudioAdapter",
+    "GoogleTTSProvider",
+    "KokoroAudioProvider",
+    "SyntheticAudioProvider",
 ]

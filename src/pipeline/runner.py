@@ -160,6 +160,13 @@ class PipelineRunner:
                 context.run_dir,
             )
 
+        self._persist_final_status(
+            context.run_dir,
+            success=success,
+            render_succeeded=render_succeeded,
+            error=failed.error if failed else None,
+        )
+
         return PipelineResult(
             run_id=context.run_id,
             success=success,
@@ -169,6 +176,66 @@ class PipelineRunner:
             quality_result=self._quality_result,
             error=failed.error if failed else None,
         )
+
+    def _persist_final_status(
+        self,
+        run_dir: Path,
+        *,
+        success: bool,
+        render_succeeded: bool,
+        error: Optional[str],
+    ) -> None:
+        """Persiste el estado final del run en ``run_dir/run.json``.
+
+        Mapea el resultado del pipeline a un :class:`RunStatus`:
+
+        - éxito + Quality PASS → ``SUCCESS``
+        - fallo antes/durante el render → ``FAILED``
+        - render OK + Quality FAIL → ``QUALITY_FAILED``
+        - un crash duro deja el run en ``RUNNING`` (no pasa por aquí) y puede
+          detectarse como abandonado por antigüedad.
+
+        Un fallo al persistir se registra sin interrumpir la ejecución (los
+        artefactos del run siguen intactos).
+        """
+        from .lifecycle import (
+            RunRecord,
+            RunStatus,
+            load_run_record,
+            write_run_record,
+        )
+
+        quality_passed: Optional[bool] = None
+        if success:
+            status = RunStatus.SUCCESS
+            if self._quality_result is not None:
+                quality_passed = self._quality_result.passed
+        elif render_succeeded and self._quality_result is not None:
+            status = RunStatus.QUALITY_FAILED
+            quality_passed = False
+        else:
+            status = RunStatus.FAILED
+
+        previous = load_run_record(run_dir)
+        try:
+            write_run_record(
+                run_dir,
+                RunRecord(
+                    run_id=self._context.run_id,
+                    status=status,
+                    created_at=previous.created_at if previous else None,
+                    started_at=previous.started_at if previous else None,
+                    finished_at=_utc_now(),
+                    error=error,
+                    quality_passed=quality_passed,
+                ),
+            )
+        except (OSError, PipelineValidationError) as exc:
+            logger.error(
+                "No se pudo persistir el estado final del run %s: %s",
+                self._context.run_id,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # Ejecución de etapas

@@ -6,8 +6,13 @@ Preparar la integración de **AI Shorts Factory** con **Google AI Studio (Gemini
 
 ## Estado
 
-- **Etapa:** Preparación de integración. El proveedor de IA aún no está confirmado ni habilitado (ver `config/providers.json`, `enabled: false`).
-- **Última actualización:** 2026-08-06.
+- **Etapa:** Implementación — pipeline de generación funcional end-to-end.
+- **Selección de proveedor:** por **variables de entorno** (ver tabla de la
+  sección 5). `config/providers.json` es **legacy**: contiene placeholders
+  (`enabled: false`) y el pipeline actual no lo lee para seleccionar providers
+  (resuelve `GEMINI_CONTENT_PROVIDER`, `GEMINI_IMAGE_PROVIDER` y
+  `GEMINI_AUDIO_PROVIDER` directamente desde el entorno).
+- **Última actualización:** 2026-08-14.
 
 ## Descripción
 
@@ -54,18 +59,33 @@ Google AI Studio es la plataforma de Google para construir aplicaciones con el *
 
 ### 5. Variables de entorno que utilizará el proyecto
 
+La documentación canónica vive en `scripts/.env.example`. El pipeline selecciona
+los proveedores mediante variables de entorno (un valor vacío usa el
+predeterminado del código); **ninguna clave de API se documenta con valores
+reales**.
+
 | Variable | Secreta | Descripción |
 |---|---|---|
-| `GEMINI_API_KEY` | Sí | Clave de API de Google AI Studio. Es la variable principal del proyecto para el proveedor Gemini. |
-| `GEMINI_MODEL` | No | Modelo de Gemini por defecto (ejemplo: `gemini-3.6-flash`). Opcional; si no se define, se usa el valor de `config/providers.json`. |
-| `GEMINI_BASE_URL` | No | URL base de la API. Opcional; por defecto `https://generativelanguage.googleapis.com/v1beta`. |
+| `GEMINI_API_KEY` | Sí | Clave de API de Google AI Studio. Obligatoria para los proveedores reales de texto, imagen (gemini) y audio (TTS). |
+| `GEMINI_CONTENT_PROVIDER` | No | Proveedor de contenido: `gemini` (real) o `synthetic` (offline). |
+| `GEMINI_MODEL` | No | Modelo LLM de texto (opcional; por defecto `gemini-3.6-flash`). |
+| `GEMINI_IMAGE_PROVIDER` | No | Proveedor de imagen: `gemini` \| `stability` \| `synthetic` (offline determinista). |
+| `GEMINI_IMAGE_MODEL` | No | Modelo de imagen (opcional; por defecto `imagen-3.0-generate-002`). |
+| `GEMINI_IMAGE_FALLBACK_PROVIDER` | No | Un fallback por ejecución para imagen (p. ej. `stability`); vacío = sin fallback. |
+| `STABILITY_API_KEY` | Sí | Clave de API de Stability AI (alternativa real de imagen; obligatoria si se usa `stability`). |
+| `GEMINI_AUDIO_PROVIDER` | No | Proveedor de audio: `gemini` (real) o `synthetic` (offline). |
+| `GEMINI_TTS_MODEL` | No | Modelo TTS (opcional; por defecto `gemini-3.1-flash-tts-preview`). |
+| `GEMINI_TTS_VOICE` | No | Voz TTS (opcional; por defecto `Kore`). |
 
-Ejemplo del archivo local `.env` (nunca se versiona):
+Ejemplo del archivo local `.env` (nunca se versiona; los valores son ejemplos):
 
 ```
 GEMINI_API_KEY=TU_API_KEY_AQUI
+GEMINI_CONTENT_PROVIDER=gemini
 GEMINI_MODEL=gemini-3.6-flash
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_IMAGE_PROVIDER=synthetic
+GEMINI_AUDIO_PROVIDER=gemini
+GEMINI_TTS_VOICE=Kore
 ```
 
 > El SDK oficial de Gemini detecta automáticamente `GEMINI_API_KEY` (y también `GOOGLE_API_KEY`, que tiene prioridad si ambas están definidas).
@@ -106,7 +126,9 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:g
 
 - [ ] Confirmar con el equipo el uso de Google AI Studio como proveedor de IA.
 - [ ] Obtener la API Key y configurarla solo en el entorno local (`.env`).
-- [ ] Habilitar el proveedor en `config/providers.json` (`enabled: true`) cuando se confirme.
-- [ ] Definir el modelo de Gemini por defecto en `config/providers.json` y/o `GEMINI_MODEL`.
+- [ ] Decidir el rol final de `config/providers.json` (legacy; el pipeline actual
+      selecciona providers por variables de entorno, no por ese archivo).
+- [ ] Probar en vivo el TTS real (`gemini-3.1-flash-tts-preview`, voz `Kore`)
+      cuando se autorice consumir la API.
 - [ ] Actualizar este documento si cambian los endpoints o requisitos de Google.
 - [ ] Registrar la decisión de proveedor como ADR en `docs/decisions/` cuando se confirme.

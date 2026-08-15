@@ -40,6 +40,7 @@ from .commands import (
 from .builder import build_render_request
 from .ffmpeg import build_project_ffmpeg_command
 from .executor import FFmpegExecutor
+from .subtitles import build_ass_subtitles
 from .exceptions import (
     RendererError,
     RendererExecutionError,
@@ -58,6 +59,7 @@ __all__ = [
     "build_ffmpeg_command",
     "build_render_request",
     "build_project_ffmpeg_command",
+    "build_ass_subtitles",
     "FFmpegExecutor",
     "RendererError",
     "RendererExecutionError",

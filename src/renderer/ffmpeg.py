@@ -26,6 +26,11 @@ from .commands import (
 )
 from .exceptions import RendererValidationError
 
+#: Duración por defecto (segundos) para una imagen sin temporización válida.
+#: Garantiza que toda imagen reciba una duración positiva y que solo las pistas
+#: de audio reales se mapeen como ``<idx>:a``.
+DEFAULT_SCENE_TIMING = 2.0
+
 
 def _is_valid_asset_path(path: Any) -> bool:
     """True si el valor es una ruta de activo estructuralmente válida.
@@ -76,6 +81,8 @@ def build_project_ffmpeg_command(
     *,
     executable: str = "ffmpeg",
     options: Sequence[str] = (),
+    subtitles: Optional[str] = None,
+    transition_fade_seconds: float = 0.0,
 ) -> FFmpegCommand:
     """Construye un :class:`FFmpegCommand` a partir de un :class:`RenderRequest`.
 
@@ -88,6 +95,10 @@ def build_project_ffmpeg_command(
         executable: binario de FFmpeg (por defecto ``"ffmpeg"``).
         options: opciones adicionales enviadas sin modificar al constructor de
             comandos.
+        subtitles: ruta (relativa al directorio de trabajo de FFmpeg) de un
+            archivo ASS a superponer al video; opcional.
+        transition_fade_seconds: duración del fundido (``fade``) entre escenas
+            en segundos; ``0`` desactiva las transiciones.
 
     Returns:
         :class:`FFmpegCommand` con las entradas y la salida resueltas.
@@ -134,7 +145,8 @@ def build_project_ffmpeg_command(
                 continue
             ffmpeg_inputs.append(FFmpegInput(path=Path(asset.path)))
             if asset.kind == AssetKind.IMAGE:
-                durations.append(_scene_duration(manifest, asset.scene_index))
+                duration = _scene_duration(manifest, asset.scene_index)
+                durations.append(duration if duration is not None else DEFAULT_SCENE_TIMING)
             else:
                 durations.append(None)
 
@@ -153,4 +165,6 @@ def build_project_ffmpeg_command(
         durations=durations or None,
         fps=fps,
         audio_codec=audio_codec,
+        subtitles=subtitles,
+        transition_fade_seconds=transition_fade_seconds,
     )

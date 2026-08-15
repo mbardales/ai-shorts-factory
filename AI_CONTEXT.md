@@ -104,6 +104,11 @@ quality_gate.py      →  veredicto PASS / WARN / FAIL (read-only)
 - `config.load_project_env()` resuelve el `.env` raíz desde el módulo, no del
   CWD; hay que llamarlo antes de construir cualquier provider.
 - `generate_manifest.py` y `render_video.py` NO lo llaman (no tocan providers).
+- Los providers se seleccionan **por variables de entorno**
+  (`GEMINI_CONTENT_PROVIDER`, `GEMINI_IMAGE_PROVIDER`, `GEMINI_AUDIO_PROVIDER`).
+  `config/providers.json` es **legacy**: contiene placeholders y el pipeline
+  actual no lo usa (``AIAdapter.from_config`` existe pero ningún flujo del
+  pipeline lo invoca). Documentación canónica de variables: `scripts/.env.example`.
 
 ## Variables de entorno
 
@@ -111,15 +116,16 @@ Ver `scripts/.env.example` para la documentación canónica. Principales:
 
 | Variable | Default | Uso |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Clave para LLM + proveedores remotos |
+| `GEMINI_API_KEY` | — | Clave para LLM + proveedores remotos (nunca en docs con valor real) |
+| `GEMINI_CONTENT_PROVIDER` | `gemini` | `gemini` \| `synthetic` |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Modelo LLM de texto |
 | `GEMINI_IMAGE_PROVIDER` | `gemini` | `gemini` \| `stability` \| `synthetic` |
-| `GEMINI_IMAGE_MODEL` | — | Modelo de Imagen |
+| `GEMINI_IMAGE_MODEL` | `imagen-3.0-generate-002` | Modelo de Imagen |
 | `GEMINI_IMAGE_FALLBACK_PROVIDER` | — | Un fallback por run |
-| `STABILITY_API_KEY` | — | Proveedor Stability |
+| `STABILITY_API_KEY` | — | Alternativa real de imagen (Stability) |
 | `GEMINI_AUDIO_PROVIDER` | `gemini` | `gemini` \| `synthetic` |
-| `GEMINI_TTS_MODEL` | — | Modelo TTS |
-| `GEMINI_TTS_VOICE` | — | Voz TTS |
+| `GEMINI_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Modelo TTS |
+| `GEMINI_TTS_VOICE` | `Kore` | Voz TTS |
 | `PIPELINE_TOPIC` | — | Tema para `run_pipeline.py` |
 
 ## Comandos

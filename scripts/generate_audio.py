@@ -8,13 +8,15 @@ Flujo:
    :class:`audio.SpeechPrompt` correspondiente.
 3. Genera la pista mediante el :class:`audio.AudioAdapter` envuelto sobre el
    proveedor seleccionado con la variable de entorno ``GEMINI_AUDIO_PROVIDER``
-   (``gemini`` por defecto o ``synthetic``).
+   (``gemini`` por defecto, ``synthetic`` o ``kokoro``).
 4. Persiste la pista en ``output/audio/`` (``narration.mp3`` para Gemini,
-   ``narration.wav`` para synthetic) usando :class:`media.LocalStorage`.
+   ``narration.wav`` para synthetic y kokoro) usando :class:`media.LocalStorage`.
 
 El proveedor ``synthetic`` genera un WAV PCM determinista offline (sin API key
 ni red), útil para validar el pipeline completo cuando el TTS externo no está
-disponible.
+disponible. El proveedor ``kokoro`` usa el TTS local Kokoro-82M (vía
+``KokoroAudioProvider``), también offline y sin API key, pero requiere un
+intérprete Python 3.12 con Kokoro instalado (ver ``KOKORO_PYTHON``).
 
 Uso:
 
@@ -46,7 +48,11 @@ from audio import (  # noqa: E402
     SpeechPrompt,
 )
 from audio.exceptions import AudioError, AudioProviderError  # noqa: E402
-from audio.providers import GoogleTTSProvider, SyntheticAudioProvider  # noqa: E402
+from audio.providers import (  # noqa: E402
+    GoogleTTSProvider,
+    KokoroAudioProvider,
+    SyntheticAudioProvider,
+)
 from media import LocalStorage, StorageError  # noqa: E402
 
 logger = logging.getLogger("generate_audio")
@@ -62,7 +68,7 @@ SYNTHETIC_OUTPUT_FILENAME = "narration.wav"
 #: Proveedor de audio por defecto si no hay variable de entorno.
 DEFAULT_AUDIO_PROVIDER = "gemini"
 #: Valores admitidos para ``GEMINI_AUDIO_PROVIDER``.
-SUPPORTED_AUDIO_PROVIDERS = ("gemini", "synthetic")
+SUPPORTED_AUDIO_PROVIDERS = ("gemini", "synthetic", "kokoro")
 #: Modelo TTS por defecto si no hay variable de entorno.
 DEFAULT_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 #: Voz TTS por defecto si no hay variable de entorno.
@@ -107,8 +113,8 @@ def build_audio_provider(provider: str | None = None) -> AudioProvider:
     """Construye el proveedor de audio según el nombre indicado.
 
     Args:
-        provider: nombre del proveedor (``gemini`` o ``synthetic``). Si es
-            ``None`` se usa el resuelto por :func:`resolve_audio_provider`.
+        provider: nombre del proveedor (``gemini``, ``synthetic`` o ``kokoro``).
+        Si es ``None`` se usa el resuelto por :func:`resolve_audio_provider`.
 
     Returns:
         Instancia concreta del proveedor seleccionado.
@@ -123,6 +129,8 @@ def build_audio_provider(provider: str | None = None) -> AudioProvider:
         return GoogleTTSProvider(model=resolve_tts_model())
     if provider == "synthetic":
         return SyntheticAudioProvider()
+    if provider == "kokoro":
+        return KokoroAudioProvider()
     raise AudioProviderError(
         f"Proveedor de audio no soportado: {provider!r}. "
         f"Valores válidos: {', '.join(SUPPORTED_AUDIO_PROVIDERS)}."
@@ -227,9 +235,9 @@ def generate_audio_to_path(content_path: Path, audio_dir: Path) -> int:
         logger.error("Error al configurar el proveedor de TTS: %s", exc)
         return 1
 
-    is_synthetic = provider_name == "synthetic"
-    audio_format = SYNTHETIC_AUDIO_FORMAT if is_synthetic else AUDIO_FORMAT
-    filename = SYNTHETIC_OUTPUT_FILENAME if is_synthetic else OUTPUT_FILENAME
+    is_wav_provider = provider_name in ("synthetic", "kokoro")
+    audio_format = SYNTHETIC_AUDIO_FORMAT if is_wav_provider else AUDIO_FORMAT
+    filename = SYNTHETIC_OUTPUT_FILENAME if is_wav_provider else OUTPUT_FILENAME
 
     storage = LocalStorage(audio_dir, auto_create=True)
     clean_alternate_narration(storage, keep=filename)
