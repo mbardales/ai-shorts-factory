@@ -71,10 +71,13 @@ PROMPT_TEMPLATE: str = (
 #: Reglas de generación aplicadas al prompt.
 RULES: tuple[str, ...] = (
     "'identity.title': titulo llamativo de 100 caracteres o menos.",
-    "'script.hook': frase de enganche para los primeros segundos.",
-    "'script.development': guion corto y dinamico para Shorts.",
-    "'visuals.scenes': 3 a 6 escenas con su 'timing_seconds'.",
-    "'narration.text': locucion completa, en espanol.",
+    "'script.hook': frase de enganche para los primeros segundos; NO repetir literalmente el titulo; aportar una promesa concreta.",
+    "'script.development': guion corto y dinamico para Shorts con informacion concreta.",
+    "'script.call_to_action': cierre contextual, breve y variado.",
+    "'visuals.scenes': 5 escenas (HOOK, 3 ideas concretas, CIERRE) o 6 solo si el contenido lo justifica.",
+    "'visuals.scenes[*].description': descripcion visual especifica de la idea de esa escena, no del titulo global.",
+    "Temas enumerativos ('5 inventos...', 'los X...', 'X razones...'): desarrollar N elementos concretos, uno por escena (HOOK + N elementos + CTA); sin escena vacia dedicada al CTA.",
+    "'narration.text': locucion completa, en espanol, de 45 a 90 palabras.",
     "'seo.description': maximo 5000 caracteres; 'seo.tags': maximo 30.",
     "'status.stage': usa 'idea'.",
 )
