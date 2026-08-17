@@ -224,6 +224,7 @@ class PipelineRunner:
                     run_id=self._context.run_id,
                     status=status,
                     created_at=previous.created_at if previous else None,
+                    queued_at=previous.queued_at if previous else None,
                     started_at=previous.started_at if previous else None,
                     finished_at=_utc_now(),
                     error=error,

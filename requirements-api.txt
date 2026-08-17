@@ -1,0 +1,10 @@
+# Dependencias mínimas de la API (control plane, ME40.7).
+#
+# Solo lo necesario para arrancar FastAPI dentro del contenedor Docker
+# (uvicorn api.app:app). No incluye google-genai: el arranque de la API no lo
+# importa (los proveedores de IA se cargan de forma perezosa en el worker,
+# fuera de esta imagen). Ninguna de estas es una dependencia nueva para el
+# proyecto (ya están presentes en el entorno local).
+fastapi>=0.115
+uvicorn>=0.30
+python-dotenv>=1.0

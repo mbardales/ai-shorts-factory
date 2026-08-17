@@ -22,3 +22,11 @@ class ApplicationRunNotFoundError(ApplicationError):
 
 class ApplicationProjectNotFoundError(ApplicationError):
     """No existe un proyecto con el ``project_id`` solicitado."""
+
+
+class WorkerUnauthorizedError(ApplicationError):
+    """El worker no está autenticado (token ausente o incorrecto)."""
+
+
+class ApplicationConflictError(ApplicationError):
+    """El estado actual del recurso impide la operación (conflicto)."""

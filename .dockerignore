@@ -1,0 +1,31 @@
+# Exclusión del contexto de build de Docker (ME40.7).
+# Nunca enviar entornos virtuales, cachés, secretos, artefactos locales ni tests.
+
+# Entornos Python locales
+.venv/
+.venv-kokoro/
+
+# Cachés y bytecode
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Control de versiones
+.git/
+
+# Secretos (nunca dentro de la imagen; se inyectan por entorno en runtime)
+.env
+
+# Artefactos y salidas del pipeline
+output/
+
+# Caché local de Hugging Face (D:\ai-hf-cache; fuera del contexto de build,
+# se excluye además por nombre)
+ai-hf-cache/
+D:\ai-hf-cache
+
+# Pruebas y temporales
+tests/
+kokoro_test.wav

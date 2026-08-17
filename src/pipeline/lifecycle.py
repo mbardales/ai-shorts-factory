@@ -44,6 +44,7 @@ _TMP_PREFIX = f".{RUN_FILE}."
 class RunStatus(str, Enum):
     """Estados de ciclo de vida de un run."""
 
+    QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
@@ -59,6 +60,7 @@ class RunRecord:
         run_id: identificador de la ejecución (``run-YYYYMMDD-HHMMSS``).
         status: estado del ciclo de vida.
         created_at: instante UTC de creación del run.
+        queued_at: instante UTC en que el run quedó encolado (``QUEUED``).
         started_at: instante UTC en que el pipeline comenzó a ejecutarse.
         finished_at: instante UTC de finalización (o ``None`` si aún corre).
         error: mensaje de error de la ejecución (si falló).
@@ -69,6 +71,7 @@ class RunRecord:
     run_id: str
     status: RunStatus
     created_at: Optional[datetime] = None
+    queued_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     error: Optional[str] = None
@@ -80,6 +83,7 @@ class RunRecord:
             "run_id": self.run_id,
             "status": self.status.value,
             "created_at": _to_iso(self.created_at),
+            "queued_at": _to_iso(self.queued_at),
             "started_at": _to_iso(self.started_at),
             "finished_at": _to_iso(self.finished_at),
             "error": self.error,
@@ -104,6 +108,7 @@ class RunRecord:
             run_id=str(data.get("run_id") or ""),
             status=status,
             created_at=_from_iso(data.get("created_at")),
+            queued_at=_from_iso(data.get("queued_at")),
             started_at=_from_iso(data.get("started_at")),
             finished_at=_from_iso(data.get("finished_at")),
             error=data.get("error") if isinstance(data.get("error"), str) else None,

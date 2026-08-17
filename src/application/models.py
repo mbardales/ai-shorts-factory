@@ -56,7 +56,9 @@ class RunStatusResponse:
             ``QUALITY_FAILED``, ``UNKNOWN``).
         success: ``True``/``False`` si el estado es terminal y determinable;
             ``None`` si el run está en curso o es desconocido.
-        video_path: ruta del video renderizado (si existe).
+        video_path: URL local segura del video (``/api/v1/runs/{run_id}/video``)
+            cuando el run tiene video servible; ``None`` en otro caso. Nunca es
+            una ruta absoluta del filesystem.
         error: mensaje de error persistido (si falló).
         stage: etapa en curso del pipeline (``content``, ``image``, ``audio``,
             ``manifest``, ``render``, ``quality``) derivada de los artefactos

@@ -50,7 +50,9 @@ class RunStatusResponse(BaseModel):
         status: estado persistido (``RUNNING``, ``SUCCESS``, ``FAILED``,
             ``QUALITY_FAILED``, ``UNKNOWN``).
         success: ``True``/``False`` si el estado es terminal; ``null`` si no.
-        video_path: ruta del video renderizado (o ``null``).
+        video_path: URL local segura del video (``/api/v1/runs/{run_id}/video``)
+            cuando el run tiene video servible; ``null`` en otro caso. Nunca es
+            una ruta absoluta del filesystem.
         error: mensaje de error persistido (o ``null``).
         stage: etapa en curso derivada de los artefactos (o ``null`` si no
             está en ejecución).
@@ -144,4 +146,58 @@ class SetActiveProjectRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Respuesta de ``GET /api/v1/health``."""
 
+    status: str
+
+
+class WorkerJobResponse(BaseModel):
+    """Job entregado por ``GET /api/v1/worker/jobs/next``.
+
+    El claim es **atómico** en el servidor (``QUEUED → RUNNING`` reutilizando
+    ``claim_job``), por lo que ``status`` refleja el estado persistido del job
+    ya adquirido por este worker.
+    """
+
+    run_id: str
+    topic: str
+    offline: bool
+    project_id: Optional[str] = None
+    status: str
+
+
+class WorkerCompleteRequest(BaseModel):
+    """Cuerpo de ``POST /api/v1/worker/jobs/{run_id}/complete``.
+
+    Attributes:
+        status: estado terminal reportado (``SUCCESS``/``FAILED``/
+            ``QUALITY_FAILED``).
+        error: mensaje de error (solo en ``FAILED``).
+    """
+
+    status: str
+    error: Optional[str] = None
+
+
+class WorkerCompleteResponse(BaseModel):
+    """Respuesta de ``complete`` con el estado final del job."""
+
+    run_id: str
+    status: str
+
+
+class WorkerProgressRequest(BaseModel):
+    """Cuerpo de ``POST /api/v1/worker/jobs/{run_id}/progress``.
+
+    Attributes:
+        stage: etapa en curso (``preparing``, ``content``, ``image``, ``audio``,
+            ``manifest``, ``render``, ``quality``). No se persiste: el sistema
+            la deriva de los artefactos del run.
+    """
+
+    stage: str
+
+
+class WorkerHeartbeatResponse(BaseModel):
+    """Respuesta de ``POST /api/v1/worker/jobs/{run_id}/heartbeat``."""
+
+    run_id: str
     status: str

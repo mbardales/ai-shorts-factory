@@ -38,6 +38,20 @@ from .lifecycle import (
 )
 from .models import PipelineResult, StageResult
 from .runner import STAGE_ORDER, PipelineRunner
+from .queue import (
+    JOB_FILE,
+    LOCK_FILE,
+    JobPayload,
+    claim_job,
+    execute_job,
+    find_orphan_jobs,
+    find_queued_jobs,
+    load_job_payload,
+    process_one,
+    process_queued_job,
+    release_job,
+    write_job_payload,
+)
 
 __all__ = [
     "PROJECT_ROOT",
@@ -64,4 +78,16 @@ __all__ = [
     "load_run_record",
     "unknown_record",
     "write_run_record",
+    "JOB_FILE",
+    "LOCK_FILE",
+    "JobPayload",
+    "claim_job",
+    "execute_job",
+    "find_orphan_jobs",
+    "find_queued_jobs",
+    "load_job_payload",
+    "process_one",
+    "process_queued_job",
+    "release_job",
+    "write_job_payload",
 ]

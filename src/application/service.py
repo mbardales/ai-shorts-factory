@@ -5,15 +5,27 @@ el :class:`PipelineRunner` para crear runs y consultar su estado persistido,
 sin HTTP y sin duplicar la lógica del pipeline:
 
 - :meth:`create_run` valida la petición, crea/usar el :class:`RunContext` y
-  ejecuta el pipeline con :class:`PipelineRunner` (respeta ``offline`` y
-  ``project_id``; no usa ``subprocess`` adicional).
+  **encola** el run (``QUEUED`` + ``job.json``) sin ejecutar el pipeline; la
+  ejecución la realiza un worker local de forma asíncrona (respeta ``offline``
+  y ``project_id``; no usa ``subprocess`` adicional).
 - :meth:`get_run` valida el ``run_id`` y lee el estado persistido
   (``run.json``) mediante las APIs existentes; **no** vuelve a ejecutar el
   pipeline.
 - :meth:`list_runs` devuelve resúmenes de historial (solo lectura) con una URL
   local segura del video, reutilizando :func:`pipeline.lifecycle.list_runs`.
-- :meth:`get_run_video` localiza y valida el video de un run para servirlo por
-  la API, sin aceptar rutas arbitrarias del cliente.
+- :meth:`get_run_video` delega en :class:`application.storage.RunStorage` para
+  localizar y validar el video de un run para servirlo por la API, sin aceptar
+  rutas arbitrarias del cliente.
+
+El almacenamiento de runs está abstraído en :class:`RunStorage`
+(:class:`LocalRunStorage` por defecto): ``ApplicationService`` y la API no
+saben si el storage es local, S3, R2, etc. (ME40.3).
+
+La **persistencia de metadata** (estado de runs, proyectos, proyecto activo y
+asociación run→proyecto) está abstraída en :class:`PersistenceRepository`
+(:class:`LocalPersistenceRepository` por defecto): el servicio ya no conoce el
+mecanismo JSON subyacente, de modo que una futura implementación sobre
+PostgreSQL pueda sustituirlo sin cambiar ni la API ni el frontend (ME40.5).
 
 La raíz de ejecuciones se resuelve desde ``pipeline.context`` (variable de
 entorno ``PIPELINE_RUNS_ROOT``) salvo que se indique explícitamente en el
@@ -28,15 +40,11 @@ from pathlib import Path
 from typing import Optional
 
 from pipeline import (
-    PipelineRunner,
     PipelineValidationError,
     RunContext,
-    list_runs,
-    load_run_record,
-    unknown_record,
 )
-from pipeline.exceptions import PipelineError
-from pipeline.lifecycle import RunRecord, RunStatus, checked_run_dir
+from pipeline.lifecycle import RunRecord, RunStatus
+from pipeline.queue import JobPayload, write_job_payload
 
 from .exceptions import (
     ApplicationError,
@@ -44,6 +52,9 @@ from .exceptions import (
     ApplicationRunNotFoundError,
     ApplicationValidationError,
 )
+from .repository import LocalPersistenceRepository, PersistenceRepository
+from .projects import validate_project_id
+from .storage import LocalRunStorage, RunStorage, StorageError
 from .models import (
     CreateProjectRequest,
     CreateRunRequest,
@@ -52,15 +63,6 @@ from .models import (
     ProjectsOverview,
     RunStatusResponse,
     RunSummary,
-)
-from .projects import (
-    associate_run,
-    create_project as _create_project,
-    get_project as _get_project,
-    list_projects as _list_projects,
-    project_id_for_run,
-    set_active_project as _set_active_project,
-    validate_project_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,29 +74,55 @@ class ApplicationService:
     Args:
         runs_root: raíz de ejecuciones; por defecto la del módulo ``context``
             (``output/runs`` o ``PIPELINE_RUNS_ROOT``).
+        storage: implementación de :class:`RunStorage`; por defecto
+            :class:`LocalRunStorage` sobre ``runs_root``.
+        repository: implementación de :class:`PersistenceRepository` para la
+            metadata (runs/proyectos); por defecto
+            :class:`LocalPersistenceRepository` sobre ``runs_root``.
     """
 
-    def __init__(self, runs_root: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        runs_root: Optional[Path] = None,
+        storage: Optional[RunStorage] = None,
+        repository: Optional[PersistenceRepository] = None,
+    ) -> None:
         self._runs_root = Path(runs_root) if runs_root is not None else None
+        self._storage = (
+            storage if storage is not None else LocalRunStorage(runs_root=runs_root)
+        )
+        self._repository = (
+            repository
+            if repository is not None
+            else LocalPersistenceRepository(runs_root=runs_root)
+        )
         logger.debug(
-            "ApplicationService creado (runs_root=%s).",
+            "ApplicationService creado (runs_root=%s, storage=%s, repository=%s).",
             self._runs_root or "default",
+            type(self._storage).__name__,
+            type(self._repository).__name__,
         )
 
     def create_run(self, request: CreateRunRequest) -> CreateRunResponse:
-        """Valida la petición y ejecuta el pipeline en un run aislado.
+        """Valida la petición y **encola** un run sin ejecutar el pipeline.
+
+        El pipeline ya no corre dentro de la petición HTTP (ME40.2): la
+        creación persiste el run como ``QUEUED`` y guarda los parámetros de
+        ejecución en ``job.json``; un worker local (``scripts/run_worker.py``)
+        lo adquiere, lo pasa a ``RUNNING`` y ejecuta el pipeline de forma
+        asíncrona.
 
         Args:
             request: petición de creación del run.
 
         Returns:
-            Respuesta con el ``run_id`` y el estado final persistido.
+            Respuesta inmediata con el ``run_id`` y el estado inicial
+            ``QUEUED``.
 
         Raises:
             ApplicationValidationError: si el tema está vacío o el ``run_id``
                 es inválido.
-            ApplicationError: si la ejecución del pipeline falla de forma no
-                controlada.
+            ApplicationError: si falla la persistencia del run encolado.
         """
         topic = (request.topic or "").strip()
         if not topic:
@@ -106,23 +134,12 @@ class ApplicationService:
 
         context = self._build_context(request.run_id)
         self._associate_run(context.run_id, project_id)
-        runner = PipelineRunner(
-            context,
-            topic=topic,
-            offline=request.offline,
-            project_id=project_id,
-        )
-        try:
-            result = runner.run()
-        except PipelineValidationError as exc:
-            raise ApplicationValidationError(str(exc)) from exc
-        except PipelineError as exc:
-            raise ApplicationError(f"El pipeline falló: {exc}") from exc
-
-        status = self._final_status(context.run_dir, success=result.success)
-        logger.info("Run %s terminó con estado %s.", result.run_id, status)
+        self._enqueue(context, topic=topic, offline=request.offline, project_id=project_id)
+        logger.info("Run %s encolado (QUEUED).", context.run_id)
         return CreateRunResponse(
-            run_id=result.run_id, status=status, project_id=project_id
+            run_id=context.run_id,
+            status=RunStatus.QUEUED.value,
+            project_id=project_id,
         )
 
     def get_run(self, run_id: str) -> RunStatusResponse:
@@ -141,23 +158,25 @@ class ApplicationService:
             ApplicationValidationError: si el ``run_id`` es inválido.
             ApplicationRunNotFoundError: si no existe el run.
         """
-        context = self._build_context(run_id)
+        self._build_context(run_id)
         try:
-            checked_run_dir(context.run_dir, runs_root=self._runs_root)
+            exists = self._repository.run_exists(run_id)
         except PipelineValidationError as exc:
             raise ApplicationValidationError(str(exc)) from exc
-        if not context.run_dir.is_dir():
+        if not exists:
             raise ApplicationRunNotFoundError(f"No existe el run: {run_id}")
 
-        record = load_run_record(context.run_dir) or unknown_record(context.run_dir)
+        record = self._repository.load_run(run_id)
+        if record is None:
+            record = RunRecord(run_id=run_id, status=RunStatus.UNKNOWN)
         return RunStatusResponse(
             run_id=record.run_id or run_id,
             status=record.status.value,
             success=_success_for_status(record.status),
-            video_path=self._find_video(context.run_dir),
+            video_path=self._video_url(record.run_id or run_id, record),
             error=record.error,
-            stage=self._derive_stage(context.run_dir, record),
-            project_id=project_id_for_run(self._resolve_runs_root(), context.run_id),
+            stage=self._derive_stage(self._run_dir_path(run_id), record),
+            project_id=self._repository.project_id_for_run(run_id),
         )
 
     def list_runs(self, project_id: Optional[str] = None) -> list[RunSummary]:
@@ -181,12 +200,10 @@ class ApplicationService:
         Raises:
             ApplicationValidationError: si el ``project_id`` es inválido.
         """
-        root = self._resolve_runs_root()
         wanted = self._resolve_project_filter(project_id)
         summaries: list[RunSummary] = []
-        for record in list_runs(root):
-            run_dir = root / record.run_id
-            run_project = project_id_for_run(root, record.run_id)
+        for record in self._repository.list_runs():
+            run_project = self._repository.project_id_for_run(record.run_id)
             if wanted == "none" and run_project is not None:
                 continue
             if wanted and wanted != "none" and run_project != wanted:
@@ -197,7 +214,7 @@ class ApplicationService:
                     status=record.status.value,
                     created_at=_to_iso(record.created_at or record.started_at),
                     duration_seconds=_duration_seconds(record),
-                    video_url=self._video_url_for(run_dir, record),
+                    video_url=self._video_url(record.run_id, record),
                     error=record.error,
                     project_id=run_project,
                 )
@@ -223,11 +240,7 @@ class ApplicationService:
         name = (request.name or "").strip()
         if not name:
             raise ApplicationValidationError("El nombre del proyecto no puede estar vacío.")
-        return _create_project(
-            self._resolve_runs_root(),
-            name,
-            request.description,
-        )
+        return self._repository.create_project(name, request.description)
 
     def list_projects(self) -> ProjectsOverview:
         """Lista los proyectos registrados y el proyecto activo.
@@ -235,7 +248,7 @@ class ApplicationService:
         Returns:
             Resumen de proyectos (solo lectura).
         """
-        projects, active = _list_projects(self._resolve_runs_root())
+        projects, active = self._repository.list_projects()
         return ProjectsOverview(projects=tuple(projects), active_project_id=active)
 
     def get_project(self, project_id: str) -> ProjectRecord:
@@ -244,7 +257,7 @@ class ApplicationService:
         Raises:
             ApplicationProjectNotFoundError: si no existe el proyecto.
         """
-        return _get_project(self._resolve_runs_root(), project_id)
+        return self._repository.get_project(project_id)
 
     def set_active_project(self, project_id: Optional[str]) -> ProjectRecord:
         """Establece (o limpia) el proyecto activo.
@@ -259,20 +272,56 @@ class ApplicationService:
         Raises:
             ApplicationProjectNotFoundError: si el proyecto no existe.
         """
-        root = self._resolve_runs_root()
-        _set_active_project(root, project_id)
+        self._repository.set_active_project(project_id)
         if project_id is None:
             return ProjectRecord(project_id="", name="")
-        return _get_project(root, project_id)
+        return self._repository.get_project(project_id)
 
     def _associate_run(self, run_id: str, project_id: Optional[str]) -> None:
         """Registra la asociación run-proyecto antes de ejecutar el pipeline."""
         try:
-            associate_run(self._resolve_runs_root(), run_id, project_id)
+            self._repository.associate_run(run_id, project_id)
         except OSError as exc:
             raise ApplicationError(
                 f"No se pudo guardar la asociación de proyecto: {exc}"
             ) from exc
+
+    def _enqueue(
+        self,
+        context: RunContext,
+        *,
+        topic: str,
+        offline: bool,
+        project_id: Optional[str],
+    ) -> None:
+        """Persiste el run como ``QUEUED`` y guarda los parámetros en ``job.json``.
+
+        No ejecuta el pipeline: el worker local adquirirá el job más adelante.
+        El estado del run se persiste a través del repositorio (metadata);
+        ``job.json`` son los parámetros de la cola (ME40.2).
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            self._repository.save_run(
+                context.run_id,
+                RunRecord(
+                    run_id=context.run_id,
+                    status=RunStatus.QUEUED,
+                    created_at=now,
+                    queued_at=now,
+                ),
+            )
+            write_job_payload(
+                context.run_dir,
+                JobPayload(
+                    run_id=context.run_id,
+                    topic=topic,
+                    offline=offline,
+                    project_id=project_id,
+                ),
+            )
+        except (OSError, PipelineValidationError) as exc:
+            raise ApplicationError(f"No se pudo encolar el run: {exc}") from exc
 
     @staticmethod
     def _resolve_project_filter(project_id: Optional[str]) -> Optional[str]:
@@ -284,13 +333,13 @@ class ApplicationService:
         return validate_project_id(project_id)
 
     def get_run_video(self, run_id: str) -> Path:
-        """Devuelve la ruta del video renderizado de un run, validada y segura.
+        """Devuelve la ruta local del video servible de un run (delegando en storage).
 
-        La ruta se deriva **exclusivamente** del ``run_id`` validado y del
-        escaneo de ``run_dir/output/video``: nunca se acepta una ruta arbitraria
-        del cliente y el resultado siempre queda contenido dentro del run. Solo
-        los runs ``SUCCESS`` y ``QUALITY_FAILED`` con video tienen archivo
-        servible; el resto se trata como "no encontrado".
+        Delega en :class:`RunStorage` (ME40.3): la resolución valida el
+        ``run_id``, mantiene el path contenido dentro del run y solo sirve
+        runs ``SUCCESS``/``QUALITY_FAILED`` con video renderizado. La ruta
+        resultante es **interna** (la consume ``FileResponse``); nunca se
+        expone al cliente.
 
         Args:
             run_id: identificador de la ejecución.
@@ -300,27 +349,17 @@ class ApplicationService:
 
         Raises:
             ApplicationValidationError: si el ``run_id`` es inválido o queda
-                fuera de ``runs_root``.
+                fuera de ``runs_root`` (traversal/ruta absoluta).
             ApplicationRunNotFoundError: si el run no existe o no tiene video
                 disponible.
         """
-        context = self._build_context(run_id)
         try:
-            checked_run_dir(context.run_dir, runs_root=self._runs_root)
-        except PipelineValidationError as exc:
+            video = self._storage.resolve_video(run_id)
+        except StorageError as exc:
             raise ApplicationValidationError(str(exc)) from exc
-        if not context.run_dir.is_dir():
-            raise ApplicationRunNotFoundError(f"No existe el run: {run_id}")
-
-        record = load_run_record(context.run_dir) or unknown_record(context.run_dir)
-        if record.status not in (RunStatus.SUCCESS, RunStatus.QUALITY_FAILED):
-            raise ApplicationRunNotFoundError(
-                f"El run {run_id} no tiene un video disponible."
-            )
-        video = self._find_video(context.run_dir)
         if video is None:
             raise ApplicationRunNotFoundError(
-                f"El run {run_id} no tiene video renderizado."
+                f"El run {run_id} no tiene un video disponible."
             )
         return Path(video)
 
@@ -328,26 +367,40 @@ class ApplicationService:
     # Ayudantes
     # ------------------------------------------------------------------
 
-    def _resolve_runs_root(self) -> Path:
-        """Raíz real de ejecuciones del servicio (explicita o por defecto)."""
-        if self._runs_root is not None:
-            return Path(self._runs_root)
-        from pipeline.context import RUNS_ROOT
+    def _run_dir_path(self, run_id: str) -> Path:
+        """Directorio del run (para derivar la etapa desde sus artefactos).
 
-        return RUNS_ROOT
+        Se resuelve a través de :class:`RunStorage` (ME40.3); el run existe
+        (ya validado por el repositorio), por lo que nunca es ``None`` para
+        ids válidos. El directorio se usa solo para inspeccionar artefactos;
+        la metadata vive en el repositorio.
+        """
+        try:
+            path = self._storage.run_dir(run_id)
+        except StorageError:
+            path = None
+        if path is None:
+            from pipeline.context import RUNS_ROOT
 
-    def _video_url_for(self, run_dir: Path, record: RunRecord) -> Optional[str]:
+            path = RUNS_ROOT / run_id
+        return path
+
+    def _video_url(self, run_id: str, record: RunRecord) -> Optional[str]:
         """URL local segura del video del run (o ``None``).
 
         Solo los runs ``SUCCESS``/``QUALITY_FAILED`` con video renderizado
         obtienen URL; la URL apunta al endpoint servidor de la API, basado
-        exclusivamente en el ``run_id`` validado.
+        exclusivamente en el ``run_id`` validado. **Nunca expone rutas
+        absolutas del filesystem**.
         """
         if record.status not in (RunStatus.SUCCESS, RunStatus.QUALITY_FAILED):
             return None
-        if self._find_video(run_dir) is None:
+        try:
+            if not self._storage.has_video(run_id):
+                return None
+        except StorageError:
             return None
-        return f"/api/v1/runs/{run_dir.name}/video"
+        return f"/api/v1/runs/{run_id}/video"
 
     def _build_context(self, run_id: Optional[str]) -> RunContext:
         """Crea el :class:`RunContext` validando el ``run_id`` cuando exista."""
@@ -363,24 +416,6 @@ class ApplicationService:
             return RunContext.create()
         except PipelineValidationError as exc:
             raise ApplicationValidationError(str(exc)) from exc
-
-    def _final_status(self, run_dir: Path, *, success: bool) -> str:
-        """Estado final persistido del run (o derivado si falta ``run.json``)."""
-        record = load_run_record(run_dir)
-        if record is not None and record.status != RunStatus.RUNNING:
-            return record.status.value
-        return RunStatus.SUCCESS.value if success else RunStatus.FAILED.value
-
-    @staticmethod
-    def _find_video(run_dir: Path) -> Optional[str]:
-        """Ruta del primer video renderizado del run (o ``None``)."""
-        video_dir = run_dir / "output" / "video"
-        if not video_dir.is_dir():
-            return None
-        for entry in sorted(video_dir.iterdir()):
-            if entry.is_file() and entry.suffix.lower() in {".mp4", ".mov", ".webm"}:
-                return str(entry)
-        return None
 
     @staticmethod
     def _derive_stage(run_dir: Path, record: RunRecord) -> Optional[str]:

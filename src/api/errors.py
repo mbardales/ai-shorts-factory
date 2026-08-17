@@ -5,6 +5,8 @@ a códigos HTTP, sin exponer stack traces ni secretos:
 
 - ``ApplicationValidationError`` → 400 (petición/run_id inválidos).
 - ``ApplicationRunNotFoundError`` → 404.
+- ``ApplicationConflictError`` → 409 (transición de job no válida).
+- ``WorkerUnauthorizedError`` → 401 (worker no autenticado).
 - ``ApplicationError`` (y cualquier excepción inesperada) → 500 genérico.
 - ``RequestValidationError`` (Pydantic/FastAPI) → 400.
 """
@@ -18,10 +20,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from application.exceptions import (
+    ApplicationConflictError,
     ApplicationError,
     ApplicationProjectNotFoundError,
     ApplicationRunNotFoundError,
     ApplicationValidationError,
+    WorkerUnauthorizedError,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,16 @@ def register_error_handlers(app: FastAPI) -> None:
         _request: Request, exc: ApplicationProjectNotFoundError
     ):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(WorkerUnauthorizedError)
+    async def _worker_unauthorized(_request: Request, exc: WorkerUnauthorizedError):
+        return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+    @app.exception_handler(ApplicationConflictError)
+    async def _application_conflict(
+        _request: Request, exc: ApplicationConflictError
+    ):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     @app.exception_handler(ApplicationError)
     async def _application_error(_request: Request, exc: ApplicationError):

@@ -234,6 +234,7 @@ class RunContext:
                 run_id=self.run_id,
                 status=RunStatus.RUNNING,
                 created_at=previous.created_at if previous else now,
+                queued_at=previous.queued_at if previous else None,
                 started_at=now,
             ),
         )

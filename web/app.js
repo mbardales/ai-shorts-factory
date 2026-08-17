@@ -14,6 +14,7 @@ const STATIC_BASE = "http://127.0.0.1:8001";
 const POLL_INTERVAL_MS = 1500;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
+const STATUS_QUEUED = "QUEUED";
 const STATUS_RUNNING = "RUNNING";
 const STATUS_SUCCESS = "SUCCESS";
 const STATUS_FAILED = "FAILED";
@@ -74,6 +75,7 @@ const STAGE_LABELS = {
 
 // Etiquetas y clase visual de cada estado para el historial.
 const STATUS_LABELS = {
+  [STATUS_QUEUED]: "En cola",
   [STATUS_RUNNING]: "Generando",
   [STATUS_SUCCESS]: "Completado",
   [STATUS_FAILED]: "Error",
@@ -82,6 +84,7 @@ const STATUS_LABELS = {
 };
 
 const STATUS_CLASS = {
+  [STATUS_QUEUED]: "info",
   [STATUS_RUNNING]: "info",
   [STATUS_SUCCESS]: "ok",
   [STATUS_FAILED]: "err",
@@ -293,6 +296,13 @@ loadHistory();
     setStatus("Estado desconocido del run.", "err");
     return;
   }
+  if (status === STATUS_QUEUED) {
+    // En cola: el worker aún no ha recogido el job; seguir haciendo polling.
+    showRunMeta(data.run_id);
+    setStatus("En cola", "info");
+    updateElapsed();
+    return;
+  }
   // En ejecución: estado legible por etapa + checklist + tiempo transcurrido.
   const active = data.stage || null;
   setStatus(active ? STAGE_LABELS[active] : "Preparando", "info");
@@ -310,7 +320,7 @@ function showResult(data, options) {
   els.video.src = url;
   els.video.hidden = false;
   els.download.href = url;
-  els.download.download = basename(data.video_path) || "short.mp4";
+  els.download.download = `${data.run_id || "short"}.mp4`;
   els.reset.hidden = false;
   showSection(els.resultCard);
 }
@@ -331,6 +341,10 @@ function buildVideoUrl(videoPath) {
     return videoPath;
   }
   const normalized = String(videoPath).replace(/\\/g, "/");
+  if (normalized.startsWith("/api/")) {
+    // URL relativa servida por la propia API (p. ej. /api/v1/runs/{id}/video).
+    return `${API_BASE}${normalized}`;
+  }
   const marker = "/runs/";
   const idx = normalized.lastIndexOf(marker);
   if (idx !== -1) {
