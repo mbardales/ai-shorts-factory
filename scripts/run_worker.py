@@ -55,6 +55,7 @@ if str(SRC) not in sys.path:
 
 from config import load_project_env  # noqa: E402
 from pipeline import RUNS_ROOT, RunContext, find_orphan_jobs, load_run_record, process_one  # noqa: E402
+from pipeline.queue import materialize_local_job  # noqa: E402
 
 logger = logging.getLogger("run_worker")
 
@@ -181,10 +182,27 @@ def run_remote_cycle(
     except Exception:  # noqa: BLE001 - aviso no crítico
         logger.debug("Heartbeat no enviado para %s.", run_id)
 
-    context = RunContext(run_id=run_id, runs_root=runs_root)
+    # ME40.8: el worker y el control plane no comparten filesystem. A partir del
+    # payload HTTP (run_id/topic/offline/project_id) se materializa LOCALMENTE
+    # el contexto y el job.json que execute_job necesita; no se copia nada desde
+    # la API. Un payload malformado (topic vacío, run_id inválido) eleva
+    # PipelineValidationError y se reporta FAILED de forma controlada.
     status = "FAILED"
     error: Optional[str] = None
     try:
+        topic = job.get("topic")
+        project_id = (
+            job.get("project_id")
+            if isinstance(job.get("project_id"), str)
+            else None
+        )
+        context = materialize_local_job(
+            runs_root,
+            run_id,
+            topic=topic if isinstance(topic, str) else "",
+            offline=bool(job.get("offline")),
+            project_id=project_id,
+        )
         (executor or run_pipeline_executor)(context)
         record = load_run_record(context.run_dir)
         if record is not None and record.status.value in (

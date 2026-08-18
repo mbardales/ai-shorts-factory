@@ -15,6 +15,11 @@ exclusivamente en el filesystem de ``runs_root``, sin Redis/PostgreSQL/SQLite:
 - :func:`find_orphan_jobs` detecta (solo lectura, sin recuperación) los runs que
   un worker muerto dejó en ``RUNNING`` o los ``QUEUED`` con bloqueo huérfano;
   la recuperación automática queda para una ME futura.
+- :func:`materialize_local_job` (ME40.8) materializa localmente el contexto y
+  el ``job.json`` de un job **outbound** a partir del payload HTTP: el worker y
+  el control plane no comparten filesystem, por lo que el worker reconstruye
+  bajo ``runs_root/<run_id>/`` lo que :func:`execute_job` necesita, sin copiar
+  nada desde la API.
 
 Seguridad: todas las operaciones validan el ``run_id`` y resuelven dentro de
 ``runs_root`` (reutilizan :func:`pipeline.lifecycle.checked_run_dir`).
@@ -240,6 +245,65 @@ def find_orphan_jobs(runs_root: Path) -> list[RunRecord]:
 #: Firmatura de un ejecutor de job: recibe el contexto adquirido y devuelve el
 #: resultado (o eleva). Por defecto ejecuta el pipeline real.
 Executor = Callable[[RunContext], object]
+
+
+def materialize_local_job(
+    runs_root: Path,
+    run_id: str,
+    *,
+    topic: str,
+    offline: bool = False,
+    project_id: Optional[str] = None,
+) -> RunContext:
+    """Materializa localmente el contexto y artefactos de un job outbound.
+
+    En la arquitectura híbrida (ME40.8) el worker y el control plane **no
+    comparten filesystem**: el worker recibe la metadata del job por HTTP
+    (``run_id``, ``topic``, ``offline``, ``project_id``) y debe reconstruir
+    **localmente**, bajo ``runs_root/<run_id>/``, los artefactos mínimos que
+    :func:`execute_job` exige:
+
+    - el directorio del run y su estado ``RUNNING`` (:meth:`RunContext.prepare`);
+    - el ``job.json`` local con los parámetros recibidos.
+
+    Así el worker deja de depender del ``job.json`` remoto del control plane,
+    sin introducir filesystem compartido ni copiar archivos desde la API. El
+    flujo local (job.json ya presente, ME40.2) no pasa por aquí.
+
+    Args:
+        runs_root: raíz de ejecuciones local del worker.
+        run_id: identificador del job (validado; traversal/rutas absolutas se
+            rechazan con :class:`PipelineValidationError`).
+        topic: tema del Short (obligatorio, no vacío).
+        offline: modo offline (proveedores sintéticos).
+        project_id: identificador opcional del contenido (solo dato; nunca se
+            usa para construir rutas del filesystem).
+
+    Returns:
+        El :class:`RunContext` preparado, listo para :func:`execute_job`.
+
+    Raises:
+        PipelineValidationError: si el ``run_id`` es inválido/inseguro o el
+            ``topic`` falta o está vacío (payload malformado).
+    """
+    context = RunContext(run_id=run_id, runs_root=runs_root)
+    clean_topic = (topic or "").strip()
+    if not clean_topic:
+        raise PipelineValidationError(
+            ["El job outbound no trae 'topic' (payload malformado)."]
+        )
+    context.prepare()
+    write_job_payload(
+        context.run_dir,
+        JobPayload(
+            run_id=run_id,
+            topic=clean_topic,
+            offline=bool(offline),
+            project_id=project_id if isinstance(project_id, str) else None,
+        ),
+    )
+    logger.info("Job outbound %s materializado localmente (job.json).", run_id)
+    return context
 
 
 def execute_job(context: RunContext) -> object:
