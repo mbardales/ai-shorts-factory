@@ -56,6 +56,13 @@ if str(SRC) not in sys.path:
 from config import load_project_env  # noqa: E402
 from pipeline import RUNS_ROOT, RunContext, find_orphan_jobs, load_run_record, process_one  # noqa: E402
 from pipeline.queue import materialize_local_job  # noqa: E402
+from application.artifacts import (  # noqa: E402
+    DEFAULT_KIND,
+    ArtifactNotFoundError,
+    ArtifactRecord,
+    ArtifactStore,
+    LocalArtifactStore,
+)
 
 logger = logging.getLogger("run_worker")
 
@@ -132,6 +139,50 @@ def run_pipeline_executor(context: RunContext) -> object:
     return execute_job(context)
 
 
+def _find_video(run_dir: Path) -> Optional[Path]:
+    """Localiza el primer ``.mp4`` renderizado dentro del run.
+
+    El renderer escribe el video en ``run_dir/output/video/``. Devuelve el
+    primero en orden alfabético, o ``None`` si no hay ninguno. Nunca sale de
+    ``run_dir`` (el glob es relativo y acotado al subdirectorio de video).
+    """
+    video_dir = Path(run_dir) / "output" / "video"
+    if not video_dir.is_dir():
+        return None
+    for candidate in sorted(video_dir.glob("*.mp4")):
+        return candidate
+    return None
+
+
+def publish_video_artifact(
+    runs_root: Path,
+    run_id: str,
+    video_path: Path,
+    *,
+    store: Optional[ArtifactStore] = None,
+) -> ArtifactRecord:
+    """Registra la metadata del video generado en ``artifacts.json`` (kind video).
+
+    ME40.9B: tras un pipeline en SUCCESS el worker publica el artefacto de
+    forma LOCAL (nunca se copia ni se mueve el MP4; la referencia queda
+    relativa al run). Idempotente: si el run ya tiene un artefacto de video
+    registrado, devuelve ese registro sin volver a publicar (no se crean
+    duplicados en el mismo ciclo).
+
+    Raises:
+        ArtifactValidationError: si el run_id es inválido o la ruta escapa del run.
+        ArtifactNotFoundError: si el archivo físico no existe.
+    """
+    store = store or LocalArtifactStore(runs_root)
+    for existing in store.list(run_id):
+        if existing.kind == DEFAULT_KIND:
+            logger.info(
+                "Artefacto de video ya publicado para %s; omitiendo.", run_id
+            )
+            return existing
+    return store.publish(run_id, video_path, kind=DEFAULT_KIND)
+
+
 def attempt_complete(
     client: WorkerApiClient,
     run_id: str,
@@ -162,9 +213,11 @@ def attempt_complete(
 def run_remote_cycle(
     client: WorkerApiClient,
     runs_root: Path,
+    *,
     executor: Optional[Callable[[RunContext], object]] = None,
+    artifact_store: Optional[ArtifactStore] = None,
 ) -> bool:
-    """Pide un job, lo ejecuta y lo completa (una iteración outbound).
+    """Pide un job, lo ejecuta, publica el artefacto y lo completa.
 
     Devuelve ``True`` si procesó un job (el llamador debe repetir el ciclo) o
     ``False`` si no había jobs en cola.
@@ -212,6 +265,34 @@ def run_remote_cycle(
         ):
             status = record.status.value
             error = record.error
+            # ME40.9B: el video solo se publica si el pipeline terminó en
+            # SUCCESS. La metadata queda en artifacts.json dentro del run local
+            # (no se copia ni mueve el MP4). SUCCESS solo se informa después de
+            # que la publicación tuvo éxito: si no hay video publicable o la
+            # publicación falla, el run se reporta FAILED de forma controlada.
+            if status == "SUCCESS":
+                try:
+                    video_path = _find_video(context.run_dir)
+                    if video_path is None:
+                        raise ArtifactNotFoundError(
+                            "No se encontró ningún .mp4 en "
+                            f"{context.run_dir / 'output' / 'video'}."
+                        )
+                    publish_video_artifact(
+                        runs_root,
+                        run_id,
+                        video_path,
+                        store=artifact_store,
+                    )
+                except Exception as exc:  # noqa: BLE001 - FAILED controlado
+                    logger.exception(
+                        "No se pudo publicar el artefacto de %s.", run_id
+                    )
+                    status = "FAILED"
+                    error = (
+                        "Pipeline SUCCESS pero falló la publicación del "
+                        f"artefacto: {exc}"
+                    )
         else:
             # Nunca se inventa SUCCESS: sin estado terminal, se reporta FAILED.
             error = "El pipeline no persistió un estado terminal."
