@@ -63,6 +63,10 @@ from application.artifacts import (  # noqa: E402
     ArtifactStore,
     LocalArtifactStore,
 )
+from application.artifact_store_factory import (  # noqa: E402
+    ArtifactStoreConfigError,
+    build_artifact_store,
+)
 
 logger = logging.getLogger("run_worker")
 
@@ -327,6 +331,13 @@ def run_remote(api_url: str, runs_root: Path, args: argparse.Namespace) -> int:
         )
         return 1
     worker_id = os.environ.get("WORKER_ID", "").strip() or "local-worker"
+    # ME40.9C.2: el backend de artefactos (local o s3) se elige por
+    # configuración vía la factory; no se duplica lógica aquí.
+    try:
+        artifact_store = build_artifact_store(runs_root)
+    except ArtifactStoreConfigError as exc:
+        logger.error("Almacenamiento de artefactos mal configurado: %s", exc)
+        return 1
     client = WorkerApiClient(api_url, token, worker_id)
     logger.info(
         "Worker outbound iniciado (api=%s worker_id=%s runs_root=%s).",
@@ -336,13 +347,13 @@ def run_remote(api_url: str, runs_root: Path, args: argparse.Namespace) -> int:
     )
     if args.once:
         try:
-            run_remote_cycle(client, runs_root)
+            run_remote_cycle(client, runs_root, artifact_store=artifact_store)
         except Exception:  # noqa: BLE001 - la API caída no destruye el job
             logger.exception("Error no controlado en el ciclo outbound.")
         return 0
     while True:
         try:
-            run_remote_cycle(client, runs_root)
+            run_remote_cycle(client, runs_root, artifact_store=artifact_store)
         except Exception:  # noqa: BLE001 - el ciclo nunca debe morir
             logger.exception("Error no controlado en el ciclo outbound.")
         time.sleep(max(0.0, args.interval))

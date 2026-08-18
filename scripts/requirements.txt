@@ -7,3 +7,8 @@
 # python-dotenv: carga de variables de entorno desde un archivo ".env".
 google-genai>=1.0.0
 python-dotenv>=1.0.1
+
+# boto3: cliente S3-compatible real del worker outbound (ME40.9C.2),
+# necesario solo para OBJECT_STORAGE_BACKEND=s3. La API/control plane
+# (requirements-api.txt) NO necesita boto3.
+boto3>=1.43.0
