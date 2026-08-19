@@ -93,6 +93,46 @@ class RunSummaryResponse(BaseModel):
     project_id: Optional[str] = None
 
 
+class ArtifactResponse(BaseModel):
+    """Metadata de un artifact publicado por un run (``GET /api/v1/runs/{run_id}/artifacts``).
+
+    Nunca expone rutas absolutas del filesystem ni URLs públicas de descarga:
+    ``reference`` es una referencia interna controlada por el servidor (object
+    key del almacenamiento o ruta relativa al run).
+
+    Attributes:
+        artifact_id: identificador único del artifact.
+        run_id: identificador de la ejecución.
+        kind: tipo lógico del artifact (``video``, ``image``, ...).
+        filename: nombre del archivo (sin rutas).
+        content_type: tipo MIME del artifact.
+        size_bytes: tamaño del artifact en bytes.
+        reference: referencia interna del artifact (no una URL pública).
+        storage: backend donde vive el artifact (``local``, ``s3-compatible``).
+    """
+
+    artifact_id: str
+    run_id: str
+    kind: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    reference: str
+    storage: str
+
+
+class ArtifactListResponse(BaseModel):
+    """Respuesta de ``GET /api/v1/runs/{run_id}/artifacts`` (solo lectura).
+
+    Attributes:
+        run_id: identificador de la ejecución consultada.
+        artifacts: metadata de los artifacts publicados del run.
+    """
+
+    run_id: str
+    artifacts: list[ArtifactResponse]
+
+
 class CreateProjectRequest(BaseModel):
     """Cuerpo de ``POST /api/v1/projects``.
 

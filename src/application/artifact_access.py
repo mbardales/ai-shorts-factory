@@ -44,3 +44,22 @@ class ArtifactAccess:
                 return record
 
         return None
+
+    def list_artifacts(self, run_id: str) -> list[ArtifactRecord]:
+        """Devuelve todos los artifacts publicados de un run (o lista vacía).
+
+        La búsqueda se limita al ``run_id`` solicitado. No accede directamente
+        al filesystem ni descarga objetos.
+        """
+        try:
+            validated_run_id = validate_run_id(run_id)
+        except PipelineValidationError as exc:
+            raise ArtifactValidationError(str(exc)) from exc
+
+        records = self._store.list(validated_run_id)
+
+        return [
+            record
+            for record in records
+            if record.run_id == validated_run_id
+        ]

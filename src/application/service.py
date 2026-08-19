@@ -46,6 +46,9 @@ from pipeline import (
 from pipeline.lifecycle import RunRecord, RunStatus
 from pipeline.queue import JobPayload, write_job_payload
 
+from .artifact_access import ArtifactAccess
+from .artifact_store_factory import ArtifactStoreConfigError, build_artifact_store
+from .artifacts import ArtifactValidationError
 from .exceptions import (
     ApplicationError,
     ApplicationProjectNotFoundError,
@@ -56,6 +59,8 @@ from .repository import LocalPersistenceRepository, PersistenceRepository
 from .projects import validate_project_id
 from .storage import LocalRunStorage, RunStorage, StorageError
 from .models import (
+    ArtifactListResponse,
+    ArtifactResponse,
     CreateProjectRequest,
     CreateRunRequest,
     CreateRunResponse,
@@ -79,6 +84,10 @@ class ApplicationService:
         repository: implementación de :class:`PersistenceRepository` para la
             metadata (runs/proyectos); por defecto
             :class:`LocalPersistenceRepository` sobre ``runs_root``.
+        artifact_access: acceso a los artifacts publicados del run (ME40.9D);
+            opcional. Si no se indica, se construye una instancia por defecto
+            mediante :func:`application.artifact_store_factory.build_artifact_store`
+            sobre ``runs_root`` (backend ``local`` por defecto).
     """
 
     def __init__(
@@ -86,6 +95,7 @@ class ApplicationService:
         runs_root: Optional[Path] = None,
         storage: Optional[RunStorage] = None,
         repository: Optional[PersistenceRepository] = None,
+        artifact_access: Optional[ArtifactAccess] = None,
     ) -> None:
         self._runs_root = Path(runs_root) if runs_root is not None else None
         self._storage = (
@@ -96,6 +106,7 @@ class ApplicationService:
             if repository is not None
             else LocalPersistenceRepository(runs_root=runs_root)
         )
+        self._artifact_access = artifact_access
         logger.debug(
             "ApplicationService creado (runs_root=%s, storage=%s, repository=%s).",
             self._runs_root or "default",
@@ -363,6 +374,61 @@ class ApplicationService:
             )
         return Path(video)
 
+    def list_artifacts(self, run_id: str) -> ArtifactListResponse:
+        """Lista la metadata de los artifacts publicados de un run.
+
+        Valida el ``run_id`` y comprueba la existencia del run mediante el
+        repositorio (mismo mecanismo que :meth:`get_run`) y delega
+        **exclusivamente** en :class:`ArtifactAccess` (que a su vez usa
+        :class:`ArtifactStore`); el servicio nunca accede al filesystem ni a S3
+        directamente. Devuelve únicamente metadata de los ``ArtifactRecord``,
+        sin URLs públicas ni rutas absolutas.
+
+        Args:
+            run_id: identificador de la ejecución.
+
+        Returns:
+            Listado de artifacts del run (puede estar vacío).
+
+        Raises:
+            ApplicationValidationError: si el ``run_id`` es inválido.
+            ApplicationRunNotFoundError: si no existe el run.
+            ApplicationError: si no se puede consultar el ArtifactAccess.
+        """
+        self._build_context(run_id)
+        try:
+            exists = self._repository.run_exists(run_id)
+        except PipelineValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        if not exists:
+            raise ApplicationRunNotFoundError(f"No existe el run: {run_id}")
+
+        access = self._resolve_artifact_access()
+        try:
+            records = access.list_artifacts(run_id)
+        except ArtifactValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - error del store -> aplicación
+            raise ApplicationError(
+                f"No se pudieron consultar los artifacts del run {run_id}: {exc}"
+            ) from exc
+        return ArtifactListResponse(
+            run_id=run_id,
+            artifacts=tuple(
+                ArtifactResponse(
+                    artifact_id=record.artifact_id,
+                    run_id=record.run_id,
+                    kind=record.kind,
+                    filename=record.filename,
+                    content_type=record.content_type,
+                    size_bytes=record.size_bytes,
+                    reference=record.reference,
+                    storage=record.storage,
+                )
+                for record in records
+            ),
+        )
+
     # ------------------------------------------------------------------
     # Ayudantes
     # ------------------------------------------------------------------
@@ -384,6 +450,28 @@ class ApplicationService:
 
             path = RUNS_ROOT / run_id
         return path
+
+    def _resolve_artifact_access(self) -> ArtifactAccess:
+        """Resuelve el :class:`ArtifactAccess` (inyectado o por defecto).
+
+        Cuando no se inyectó ninguno, construye un acceso por defecto sobre
+        ``runs_root`` mediante :func:`build_artifact_store` (backend ``local``
+        salvo configuración explícita). Los errores de configuración se
+        traducen a :class:`ApplicationError`.
+        """
+        if self._artifact_access is not None:
+            return self._artifact_access
+        if self._runs_root is not None:
+            runs_root = self._runs_root
+        else:
+            from pipeline.context import RUNS_ROOT
+
+            runs_root = RUNS_ROOT
+        try:
+            self._artifact_access = ArtifactAccess(build_artifact_store(runs_root))
+        except ArtifactStoreConfigError as exc:
+            raise ApplicationError(f"ArtifactAccess no configurado: {exc}") from exc
+        return self._artifact_access
 
     def _video_url(self, run_id: str, record: RunRecord) -> Optional[str]:
         """URL local segura del video del run (o ``None``).

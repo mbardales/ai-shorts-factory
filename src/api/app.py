@@ -11,6 +11,9 @@ Expone endpoints que **delegan exclusivamente** en
 - ``GET /api/v1/runs/{run_id}/video`` → sirve el video renderizado del run
   (a través de :class:`application.storage.RunStorage`, sin exponer rutas del
   filesystem).
+- ``GET /api/v1/runs/{run_id}/artifacts`` → lista la metadata de los artifacts
+  publicados del run (a través de :class:`application.ArtifactAccess`, solo
+  lectura; sin URLs públicas ni rutas absolutas).
 - ``GET /api/v1/health`` → solo verifica disponibilidad (no ejecuta pipeline).
 - ``GET /api/v1/worker/jobs/next`` → entrega el siguiente job al worker
   (claim atómico ``QUEUED → RUNNING``; requiere ``Authorization: Bearer``).
@@ -33,13 +36,19 @@ from fastapi import FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
+from pipeline.context import RUNS_ROOT
+
 from application import ApplicationService, WorkerService
+from application.artifact_access import ArtifactAccess
+from application.artifact_store_factory import build_artifact_store
 from application.exceptions import WorkerUnauthorizedError
 from application.models import CreateProjectRequest as AppCreateProjectRequest
 from application.models import CreateRunRequest as AppCreateRunRequest
 
 from . import errors as _errors
 from .models import (
+    ArtifactListResponse,
+    ArtifactResponse,
     CreateProjectRequest,
     CreateRunRequest,
     CreateRunResponse,
@@ -59,17 +68,27 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
-def create_app(runs_root: Optional[Path] = None) -> FastAPI:
+def create_app(
+    runs_root: Optional[Path] = None,
+    artifact_access: Optional[ArtifactAccess] = None,
+) -> FastAPI:
     """Construye la aplicación FastAPI con su servicio de aplicación.
 
     Args:
         runs_root: raíz de ejecuciones para el servicio (por defecto la del
             módulo ``application``).
+        artifact_access: acceso a artifacts publicado por la API (por defecto
+            se construye uno sobre ``runs_root`` vía ``build_artifact_store``).
 
     Returns:
         Aplicación FastAPI configurada.
     """
-    service = ApplicationService(runs_root=runs_root)
+    if artifact_access is None:
+        artifact_access = _build_artifact_access(runs_root)
+    service = ApplicationService(
+        runs_root=runs_root,
+        artifact_access=artifact_access,
+    )
     worker_service = WorkerService(runs_root=runs_root)
     app = FastAPI(title="AI Shorts Factory API", version="0.1.0")
     app.add_middleware(
@@ -147,6 +166,34 @@ def create_app(runs_root: Optional[Path] = None) -> FastAPI:
     def get_run_video(run_id: str) -> FileResponse:
         video_path = service.get_run_video(run_id)
         return FileResponse(video_path, media_type="video/mp4")
+
+    @app.get(
+        "/api/v1/runs/{run_id}/artifacts",
+        response_model=ArtifactListResponse,
+        summary="Lista los artifacts publicados de un run (solo metadata)",
+    )
+    def list_run_artifacts(run_id: str) -> ArtifactListResponse:
+        result = service.list_artifacts(run_id)
+        logger.info(
+            "HTTP GET /api/v1/runs/%s/artifacts -> %d artifacts",
+            run_id, len(result.artifacts),
+        )
+        return ArtifactListResponse(
+            run_id=result.run_id,
+            artifacts=[
+                ArtifactResponse(
+                    artifact_id=item.artifact_id,
+                    run_id=item.run_id,
+                    kind=item.kind,
+                    filename=item.filename,
+                    content_type=item.content_type,
+                    size_bytes=item.size_bytes,
+                    reference=item.reference,
+                    storage=item.storage,
+                )
+                for item in result.artifacts
+            ],
+        )
 
     @app.post(
         "/api/v1/projects",
@@ -287,6 +334,20 @@ def create_app(runs_root: Optional[Path] = None) -> FastAPI:
         return WorkerHeartbeatResponse(run_id=run_id, status=status)
 
     return app
+
+
+def _build_artifact_access(runs_root: Optional[Path]) -> ArtifactAccess:
+    """Construye el :class:`ArtifactAccess` de la API (fail-fast).
+
+    Resuelve la raíz de ejecuciones efectiva (explícita o el valor por defecto
+    de ``pipeline.context``) y delega en :func:`build_artifact_store` (backend
+    ``local`` salvo configuración explícita). Una configuración de backend
+    inválida (p. ej. ``s3`` sin boto3, sin credenciales o sin endpoint) hace
+    que ``create_app()`` falle al arrancar: los fallos reales de producción
+    no se ocultan silenciosamente.
+    """
+    artifact_root = runs_root if runs_root is not None else RUNS_ROOT
+    return ArtifactAccess(build_artifact_store(artifact_root))
 
 
 #: Instancia por defecto para ``uvicorn api.app:app``.

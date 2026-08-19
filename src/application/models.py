@@ -142,3 +142,42 @@ class ProjectsOverview:
 
     projects: tuple[ProjectRecord, ...]
     active_project_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ArtifactResponse:
+    """Metadata de un artifact publicado por un run (solo lectura).
+
+    Attributes:
+        artifact_id: identificador único del artifact.
+        run_id: identificador de la ejecución.
+        kind: tipo lógico del artifact (``video``, ``image``, ...).
+        filename: nombre del archivo (sin rutas).
+        content_type: tipo MIME del artifact.
+        size_bytes: tamaño del artifact en bytes.
+        reference: referencia interna controlada por el servidor (object key o
+            ruta relativa al run); nunca una URL pública ni una ruta absoluta.
+        storage: backend donde vive el artifact (``local``, ``s3-compatible``).
+    """
+
+    artifact_id: str
+    run_id: str
+    kind: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    reference: str
+    storage: str
+
+
+@dataclass(frozen=True)
+class ArtifactListResponse:
+    """Listado de artifacts publicados de un run (solo lectura).
+
+    Attributes:
+        run_id: identificador de la ejecución consultada.
+        artifacts: metadata de los artifacts publicados del run.
+    """
+
+    run_id: str
+    artifacts: tuple[ArtifactResponse, ...] = ()
