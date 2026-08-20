@@ -153,6 +153,12 @@ class FakeS3Client:
         self.buckets_seen.add(bucket)
         return [e for k, e in self.objects.items() if k.startswith(prefix)]
 
+    def presign_get_url(self, bucket: str, key: str, *, expires_in: int) -> str:
+        return (
+            f"https://presigned.example.invalid/{bucket}/{key}"
+            f"?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"
+        )
+
 
 def make_source(nombre: str = "video.mp4", payload: bytes = VIDEO_PAYLOAD) -> Path:
     p = TEST_DATA / nombre

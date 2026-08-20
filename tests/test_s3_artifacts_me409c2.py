@@ -71,6 +71,13 @@ class FakeRawS3:
         obj = self.objects.get(kw["Key"], {})
         return {"Metadata": obj.get("metadata") or {}}
 
+    def generate_presigned_url(self, method, *, Params, ExpiresIn):
+        self.calls.append(("generate_presigned_url", (method, Params, ExpiresIn)))
+        return (
+            f"https://presigned.example.invalid/{Params['Bucket']}/{Params['Key']}"
+            f"?X-Amz-Expires={ExpiresIn}&X-Amz-Signature=fake"
+        )
+
 
 class _FakePaginator:
     def __init__(self, raw):

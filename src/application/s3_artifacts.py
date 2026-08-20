@@ -33,8 +33,10 @@ from application.artifacts import (
     ArtifactNotFoundError,
     ArtifactRecord,
     ArtifactStore,
+    ArtifactUrlUnavailableError,
     ArtifactValidationError,
     content_type_for,
+    validate_expires_in,
 )
 from pipeline.context import RUN_ID_PATTERN, validate_run_id
 from pipeline.exceptions import PipelineValidationError
@@ -74,6 +76,13 @@ class S3Client(Protocol):
 
     def list_objects(self, bucket: str, prefix: str) -> list[object]:
         """Lista objetos bajo un prefijo (cada entrada con ``.key`` y ``.metadata``)."""
+
+    def presign_get_url(self, bucket: str, key: str, *, expires_in: int) -> str:
+        """Genera una URL temporal firmada (GET) para un objeto privado.
+
+        No descarga el objeto: solo firma una URL de descarga con expiración
+        limitada (presign). ``expires_in`` es la validez en segundos.
+        """
 
 
 class S3CompatibleArtifactStore(ArtifactStore):
@@ -260,3 +269,53 @@ class S3CompatibleArtifactStore(ArtifactStore):
             if record is not None and record.artifact_id == artifact_id:
                 return record
         return None
+
+    def get_temporary_url(self, artifact_id: object, expires_in: int) -> str:
+        """URL temporal firmada (presign) de un artefacto privado (ME40.9D.3.2).
+
+        Valida la entrada, localiza el artefacto **sin descargarlo** (solo
+        metadata vía :meth:`get`) y delega la firma en el cliente inyectado
+        (``presign_get_url``). La URL es temporal (nunca pública permanente),
+        el bucket permanece privado y no se exponen credenciales.
+
+        Args:
+            artifact_id: identificador único del artefacto.
+            expires_in: validez de la URL en segundos (entero positivo).
+
+        Returns:
+            URL temporal firmada (GET) con expiración limitada.
+
+        Raises:
+            ArtifactValidationError: si ``artifact_id`` o ``expires_in`` son
+                inválidos.
+            ArtifactNotFoundError: si no existe el artefacto.
+            ArtifactUrlUnavailableError: si el cliente inyectado no soporta
+                presign.
+            S3ArtifactError: si el cliente falla al firmar la URL.
+        """
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ArtifactValidationError("artifact_id inválido o ausente.")
+        validate_expires_in(expires_in)
+        client = self._require_client()
+        record = self.get(artifact_id)
+        if record is None:
+            raise ArtifactNotFoundError(f"No existe el artefacto: {artifact_id}")
+        presign = getattr(client, "presign_get_url", None)
+        if not callable(presign):
+            raise ArtifactUrlUnavailableError(
+                "El cliente S3 inyectado no soporta generar URLs temporales "
+                "firmadas (presign)."
+            )
+        try:
+            return presign(
+                bucket=self._bucket,
+                key=record.reference,
+                expires_in=expires_in,
+            )
+        except ArtifactUrlUnavailableError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - error de cliente -> aplicación
+            raise S3ArtifactError(
+                f"No se pudo generar la URL temporal del artefacto "
+                f"{artifact_id}: {exc}"
+            ) from exc

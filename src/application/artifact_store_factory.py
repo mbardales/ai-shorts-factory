@@ -123,6 +123,19 @@ class Boto3S3Client:
                 entries.append(S3ListedObject(key=obj["Key"], metadata=metadata))
         return entries
 
+    def presign_get_url(self, bucket: str, key: str, *, expires_in: int) -> str:
+        """Firma una URL temporal (GET) para un objeto privado del bucket.
+
+        Delega en ``generate_presigned_url`` del cliente boto3 (sin descargar
+        el objeto). ``expires_in`` es la validez en segundos; el bucket
+        permanece privado (URL firmada, nunca pública permanente).
+        """
+        return self._raw.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+
 
 def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()

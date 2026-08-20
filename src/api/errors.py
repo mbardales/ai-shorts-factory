@@ -25,6 +25,7 @@ from application.exceptions import (
     ApplicationProjectNotFoundError,
     ApplicationRunNotFoundError,
     ApplicationValidationError,
+    ApplicationVideoNotFoundError,
     WorkerUnauthorizedError,
 )
 
@@ -45,6 +46,12 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ApplicationRunNotFoundError)
     async def _run_not_found(_request: Request, exc: ApplicationRunNotFoundError):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(ApplicationVideoNotFoundError)
+    async def _video_not_found(
+        _request: Request, exc: ApplicationVideoNotFoundError
+    ):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @app.exception_handler(ApplicationProjectNotFoundError)

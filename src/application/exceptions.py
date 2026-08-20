@@ -20,6 +20,10 @@ class ApplicationRunNotFoundError(ApplicationError):
     """No existe un run con el ``run_id`` solicitado."""
 
 
+class ApplicationVideoNotFoundError(ApplicationError):
+    """El run existe pero no tiene un artifact de video publicada (ME40.9D.3.4)."""
+
+
 class ApplicationProjectNotFoundError(ApplicationError):
     """No existe un proyecto con el ``project_id`` solicitado."""
 

@@ -58,6 +58,35 @@ class ArtifactNotFoundError(ArtifactError):
     """El artefacto solicitado no existe (o el archivo físico no está)."""
 
 
+class ArtifactUrlUnavailableError(ArtifactError):
+    """El backend no puede emitir una URL temporal de descarga del artefacto.
+
+    Se eleva de forma explícita (nunca se inventa una URL pública) cuando el
+    respaldo actual no soporta URLs temporales firmadas: el backend local (que
+    sirve a través del control plane) o un cliente S3 aún sin capacidad de
+    presign (ME40.9D.3.1).
+    """
+
+
+def validate_expires_in(expires_in: object) -> int:
+    """Valida la expiración de una URL temporal (segundos, entero positivo).
+
+    Args:
+        expires_in: validez solicitada en segundos.
+
+    Returns:
+        El valor normalizado (entero positivo).
+
+    Raises:
+        ArtifactValidationError: si no es un entero positivo (``bool`` no vale).
+    """
+    if isinstance(expires_in, bool) or not isinstance(expires_in, int) or expires_in <= 0:
+        raise ArtifactValidationError(
+            "expires_in debe ser un entero positivo (segundos)."
+        )
+    return expires_in
+
+
 def content_type_for(filename: str) -> str:
     """Devuelve el ``Content-Type`` estimado a partir de la extensión."""
     suffix = Path(filename).suffix.lower()
@@ -158,6 +187,30 @@ class ArtifactStore(ABC):
     @abstractmethod
     def get(self, artifact_id: str) -> Optional[ArtifactRecord]:
         """Devuelve un artefacto por id, o ``None`` si no existe."""
+
+    @abstractmethod
+    def get_temporary_url(self, artifact_id: str, expires_in: int) -> str:
+        """Obtiene una URL temporal de descarga de un artefacto privado.
+
+        Prepara la entrega de artefactos (ME40.9D.3.1): el artefacto es
+        privado, por lo que una URL temporal con expiración limitada solo se
+        emite si el backend puede firmarla de forma segura. Ninguna
+        implementación genera URLs públicas ni expone credenciales.
+
+        Args:
+            artifact_id: identificador único del artefacto.
+            expires_in: validez de la URL en segundos (entero positivo).
+
+        Returns:
+            URL temporal de descarga con expiración limitada.
+
+        Raises:
+            ArtifactValidationError: si ``artifact_id`` o ``expires_in`` son
+                inválidos.
+            ArtifactNotFoundError: si no existe el artefacto.
+            ArtifactUrlUnavailableError: si el backend no puede emitir una URL
+                temporal segura (p. ej. local o cliente S3 sin presign).
+        """
 
 
 class LocalArtifactStore(ArtifactStore):
@@ -276,3 +329,22 @@ class LocalArtifactStore(ArtifactStore):
                 if record.artifact_id == artifact_id:
                     return record
         return None
+
+    def get_temporary_url(self, artifact_id: str, expires_in: int) -> str:
+        """URL temporal de descarga de un artefacto privado (backend local).
+
+        El backend local NO emite URLs públicas: el artefacto es privado y se
+        servirá a través del control plane. Comportamiento explícito y seguro:
+        valida la entrada, comprueba que el artefacto exista y eleva
+        :class:`ArtifactUrlUnavailableError` (nunca inventa una URL).
+        """
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ArtifactValidationError("artifact_id inválido o ausente.")
+        validate_expires_in(expires_in)
+        if self.get(artifact_id) is None:
+            raise ArtifactNotFoundError(f"No existe el artefacto: {artifact_id}")
+        raise ArtifactUrlUnavailableError(
+            "El backend local no emite URLs temporales de descarga: el "
+            "artefacto es privado y se servirá a través del control plane, "
+            "no con una URL pública."
+        )

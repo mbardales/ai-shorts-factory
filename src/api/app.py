@@ -34,14 +34,14 @@ from typing import List, Optional
 
 from fastapi import FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import RedirectResponse, Response
 
 from pipeline.context import RUNS_ROOT
 
 from application import ApplicationService, WorkerService
 from application.artifact_access import ArtifactAccess
 from application.artifact_store_factory import build_artifact_store
-from application.exceptions import WorkerUnauthorizedError
+from application.exceptions import ApplicationVideoNotFoundError, WorkerUnauthorizedError
 from application.models import CreateProjectRequest as AppCreateProjectRequest
 from application.models import CreateRunRequest as AppCreateRunRequest
 
@@ -66,6 +66,10 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Expiración de la URL temporal del video (segundos). Controlada por el
+#: servidor: el cliente nunca la elige (ME40.9D.3.4).
+VIDEO_URL_EXPIRES_SECONDS = 300
 
 
 def create_app(
@@ -160,12 +164,17 @@ def create_app(
 
     @app.get(
         "/api/v1/runs/{run_id}/video",
-        response_class=FileResponse,
-        summary="Sirve el video renderizado de un run",
+        response_class=RedirectResponse,
+        summary="Redirige (307) a la URL temporal firmada del video del run",
     )
-    def get_run_video(run_id: str) -> FileResponse:
-        video_path = service.get_run_video(run_id)
-        return FileResponse(video_path, media_type="video/mp4")
+    def get_run_video(run_id: str) -> RedirectResponse:
+        url = service.get_video_temporary_url(run_id, VIDEO_URL_EXPIRES_SECONDS)
+        if url is None:
+            raise ApplicationVideoNotFoundError(
+                f"No hay video publicada para el run: {run_id}"
+            )
+        logger.info("HTTP GET /api/v1/runs/%s/video -> 307", run_id)
+        return RedirectResponse(url, status_code=307)
 
     @app.get(
         "/api/v1/runs/{run_id}/artifacts",

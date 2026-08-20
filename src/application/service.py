@@ -429,6 +429,47 @@ class ApplicationService:
             ),
         )
 
+    def get_video_temporary_url(self, run_id: str, expires_in: int) -> Optional[str]:
+        """URL temporal firmada del video de un run, si existe.
+
+        Delega **exclusivamente** en :class:`ArtifactAccess` (que a su vez
+        delega en :class:`ArtifactStore`): el servicio no conoce S3, boto3,
+        buckets ni object keys, no accede al filesystem y nunca genera URLs.
+        Si el run no tiene video publicada devuelve ``None``.
+
+        Args:
+            run_id: identificador de la ejecución.
+            expires_in: validez de la URL en segundos (entero positivo).
+
+        Returns:
+            URL temporal firmada del video, o ``None`` si el run no tiene video.
+
+        Raises:
+            ApplicationValidationError: si el ``run_id`` o ``expires_in`` son
+                inválidos.
+            ApplicationRunNotFoundError: si no existe el run.
+            ApplicationError: si el backend no puede emitir la URL temporal o
+                falla la consulta.
+        """
+        self._build_context(run_id)
+        try:
+            exists = self._repository.run_exists(run_id)
+        except PipelineValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        if not exists:
+            raise ApplicationRunNotFoundError(f"No existe el run: {run_id}")
+
+        access = self._resolve_artifact_access()
+        try:
+            return access.get_video_temporary_url(run_id, expires_in)
+        except ArtifactValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - error del store -> aplicación
+            raise ApplicationError(
+                f"No se pudo obtener la URL temporal del video del run "
+                f"{run_id}: {exc}"
+            ) from exc
+
     # ------------------------------------------------------------------
     # Ayudantes
     # ------------------------------------------------------------------

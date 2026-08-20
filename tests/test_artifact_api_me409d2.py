@@ -37,6 +37,12 @@ class FakeArtifactStore(ArtifactStore):
                     return record
         return None
 
+    def get_temporary_url(self, artifact_id, expires_in):
+        return (
+            f"https://presigned.example.invalid/{artifact_id}"
+            f"?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"
+        )
+
 
 def make_record(
     *,
@@ -249,7 +255,7 @@ with tempfile.TemporaryDirectory(prefix="me409d2-") as tmp:
         runs_root=Path(tmp),
         artifact_access=api_access,
     )
-    client = TestClient(app)
+    client = TestClient(app, follow_redirects=False)
 
     created = client.post(
         "/api/v1/runs",
@@ -357,8 +363,11 @@ with tempfile.TemporaryDirectory(prefix="me409d2-") as tmp:
 
     video_endpoint = client.get(f"/api/v1/runs/{RUN_ID}/video")
     check(
-        video_endpoint.status_code == 404,
-        "H14 GET /api/v1/runs/{run_id}/video sigue funcionando (404 sin video)",
+        video_endpoint.status_code == 307
+        and video_endpoint.headers.get("location", "").startswith("https://")
+        and video_endpoint.content == b"",
+        "H14 GET /api/v1/runs/{run_id}/video redirige (307) a la URL temporal "
+        "del video (sin descargar en la API)",
     )
 
     check(
