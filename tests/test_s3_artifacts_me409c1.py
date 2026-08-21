@@ -431,10 +431,19 @@ check("http" not in rec.reference.lower(), "Q6 ninguna URL pública generada")
 # ---------------------------------------------------------------------------
 
 fuente = (SRC / "application" / "s3_artifacts.py").read_text(encoding="utf-8")
-prohibidos = ["import boto3", "from boto3", "import requests", "from requests", "import urllib", "from urllib"]
+# ME40.9F: se prohíben los módulos con capacidad de red real; urllib.parse
+# (parsing puro de URLs, sin conexiones) queda permitido para la huella.
+prohibidos = [
+    "import boto3", "from boto3",
+    "import requests", "from requests",
+    "import urllib.request", "from urllib.request",
+    "import urllib.error", "from urllib.error",
+    "import http.client", "from http.client",
+    "import socket", "from socket",
+]
 check(
     all(p not in fuente for p in prohibidos),
-    "R1 el adapter no importa boto3/requests/urllib",
+    "R1 el adapter no importa boto3/requests/urllib.request ni clientes HTTP",
 )
 check(
     "r2" not in fuente.lower() and "cloudflare" not in fuente.lower(),
@@ -468,25 +477,9 @@ diff = subprocess.run(
 check(diff.returncode == 0, "T1 git diff --check")
 if diff.returncode != 0:
     print(diff.stdout)
-st = subprocess.run(
-    ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(ROOT)
-).stdout.splitlines()
-modificados = [l for l in st if l.startswith(" M ") or l.startswith("M ")]
-untracked = [l[3:].replace("/", "\\") for l in st if l.startswith("?? ")]
-mod_sin_agents = [l[3:].replace("/", "\\") for l in modificados if "AGENTS.md" not in l]
-check(
-    mod_sin_agents == [],
-    f"T2 ningún archivo tracked modificado (además de AGENTS.md preexistente): {mod_sin_agents}",
-)
-allowed = {
-    "src\\application\\artifacts.py",
-    "tests\\test_artifacts_me409a.py",
-    "scripts\\run_worker.py",
-    "tests\\test_worker_artifact_publish_me409b.py",
-    "src\\application\\s3_artifacts.py",
-    "tests\\test_s3_artifacts_me409c1.py",
-}
-check(set(untracked) <= allowed, f"T3 solo archivos ME40.9A/B/C.1 creados: {untracked}")
+# ME40.9F: los checks git-scope efímeros (T2/T3 sobre `git status`) se
+# eliminaron: solo tenían validez durante el desarrollo de ME40.9A/B/C.1 y
+# provocaban falsos fallos en cualquier ME posterior.
 
 # ---------------------------------------------------------------------------
 # Restauración del bloqueo de red.

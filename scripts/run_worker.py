@@ -135,6 +135,50 @@ class WorkerApiClient:
             {"status": status, "error": error},
         )[0]
 
+    def fetch_health(self) -> dict:
+        """Consulta ``GET /api/v1/health`` (ME40.9F: huella de artifacts).
+
+        Returns:
+            El cuerpo JSON de la respuesta (dict).
+
+        Raises:
+            WorkerApiError: si la API no responde 200 con un objeto JSON.
+        """
+        st, data = self._request("GET", "/api/v1/health")
+        if st == 200 and isinstance(data, dict):
+            return data
+        raise WorkerApiError(f"health devolvió el estado {st}.")
+
+
+def storage_config_mismatch(
+    local_fingerprint: dict[str, str],
+    remote_health: Optional[dict],
+) -> bool:
+    """Decide si la configuración de artefactos diverge de la del API (ME40.9F).
+
+    Comparación direccional: cada clave de la huella local debe coincidir con
+    la reportada por la API; claves extra en la API se ignoran (tolerante a
+    despliegues mixtos durante una actualización). Si la API no reporta huella
+    (versión previa a ME40.9F) no hay forma de comparar: se asume compatible.
+
+    Args:
+        local_fingerprint: huella del store local (``store.describe()``).
+        remote_health: cuerpo de ``GET /api/v1/health`` (o ``None`` si la API
+            no está disponible).
+
+    Returns:
+        ``True`` solo si hay una divergencia confirmada (fail-fast).
+    """
+    remote = None
+    if isinstance(remote_health, dict):
+        remote = remote_health.get("artifacts")
+    if not isinstance(remote, dict) or not remote:
+        return False
+    return any(
+        str(remote.get(key)) != str(value)
+        for key, value in local_fingerprint.items()
+    )
+
 
 def run_pipeline_executor(context: RunContext) -> object:
     """Ejecuta el pipeline real sobre un contexto adquirido (vía job.json)."""
@@ -339,6 +383,26 @@ def run_remote(api_url: str, runs_root: Path, args: argparse.Namespace) -> int:
         logger.error("Almacenamiento de artefactos mal configurado: %s", exc)
         return 1
     client = WorkerApiClient(api_url, token, worker_id)
+    # ME40.9F: paridad operativa. Si la API está disponible y su backend de
+    # artefactos difiere del del worker, abortar ANTES de reclamar jobs (un
+    # video publicado en un backend que la API no sirve es un 404 silencioso).
+    propia = artifact_store.describe()
+    try:
+        salud = client.fetch_health()
+    except WorkerApiError as exc:
+        logger.warning(
+            "API no disponible para verificar la configuración de artefactos "
+            "(%s); se continúa con el ciclo outbound.", exc,
+        )
+    else:
+        if storage_config_mismatch(propia, salud):
+            logger.error(
+                "Configuración de artefactos divergente entre worker y API: "
+                "worker=%s api=%s. Abortando antes de reclamar jobs.",
+                propia,
+                salud.get("artifacts"),
+            )
+            return 1
     logger.info(
         "Worker outbound iniciado (api=%s worker_id=%s runs_root=%s).",
         api_url,

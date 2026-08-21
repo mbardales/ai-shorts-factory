@@ -396,6 +396,7 @@ import os
 
 from fastapi import FastAPI
 
+import config as _config
 from application.artifact_store_factory import ArtifactStoreConfigError
 
 _saved_env = {
@@ -409,33 +410,41 @@ _saved_env = {
         "OBJECT_STORAGE_SECRET_KEY",
     )
 }
+#: ME40.9F: create_app carga el .env raíz; esta sección valida el fail-fast
+#: ante configuración incompleta y el default local, así que aísla el test
+#: del .env real.
+_env_real = _config.DEFAULT_ENV_FILE
+_config.DEFAULT_ENV_FILE = Path("_me409d2_sin_env.env")
 
 try:
-    for name in _saved_env:
-        os.environ.pop(name, None)
-    os.environ["OBJECT_STORAGE_BACKEND"] = "s3"
     try:
-        create_app()
-    except ArtifactStoreConfigError:
-        print(
-            "[OK] I1 create_app falla al arrancar (fail-fast) con backend S3 mal configurado"
-        )
-    else:
-        raise AssertionError(
-            "I1 create_app debería propagar ArtifactStoreConfigError con backend S3 inválido"
-        )
-finally:
-    for name, value in _saved_env.items():
-        if value is None:
+        for name in _saved_env:
             os.environ.pop(name, None)
+        os.environ["OBJECT_STORAGE_BACKEND"] = "s3"
+        try:
+            create_app()
+        except ArtifactStoreConfigError:
+            print(
+                "[OK] I1 create_app falla al arrancar (fail-fast) con backend S3 mal configurado"
+            )
         else:
-            os.environ[name] = value
+            raise AssertionError(
+                "I1 create_app debería propagar ArtifactStoreConfigError con backend S3 inválido"
+            )
+    finally:
+        for name, value in _saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
-local_app = create_app()
-check(
-    isinstance(local_app, FastAPI),
-    "I2 create_app con backend local (por defecto) sigue funcionando",
-)
+    local_app = create_app()
+    check(
+        isinstance(local_app, FastAPI),
+        "I2 create_app con backend local (por defecto) sigue funcionando",
+    )
+finally:
+    _config.DEFAULT_ENV_FILE = _env_real
 
 
 print()

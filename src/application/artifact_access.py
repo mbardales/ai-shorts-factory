@@ -40,6 +40,11 @@ class ArtifactAccess:
             raise ValueError("store es obligatorio.")
         self._store = store
 
+    @property
+    def store(self) -> ArtifactStore:
+        """Store subyacente (solo lectura; ME40.9F: huella operativa)."""
+        return self._store
+
     def get_video(self, run_id: str) -> Optional[ArtifactRecord]:
         """Devuelve el artifact de video de un run, si existe.
 

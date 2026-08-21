@@ -155,6 +155,18 @@ def persist_terminal(run_dir: Path, status: RunStatus) -> None:
     )
 
 
+#: ME40.9B: el ciclo outbound publica el artefacto de video tras un SUCCESS;
+#: los executors que simulan éxito deben dejar un .mp4 en el run (contrato).
+FAKE_MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 2048
+
+
+def write_fake_video(run_dir: Path) -> None:
+    """Escribe un MP4 ficticio donde el worker espera el video renderizado."""
+    vdir = Path(run_dir) / "output" / "video"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "video.mp4").write_bytes(FAKE_MP4)
+
+
 # ---------------------------------------------------------------------------
 # Guardia de red (L): ningún test debe hacer HTTP externo.
 # ---------------------------------------------------------------------------
@@ -240,6 +252,7 @@ def executor_f(context: RunContext) -> None:
     seen["payload"] = payload
     seen["job_json"] = (context.run_dir / "job.json").is_file()
     seen["run_json"] = load_run_record(context.run_dir)
+    write_fake_video(context.run_dir)
     persist_terminal(context.run_dir, RunStatus.SUCCESS)
 
 
@@ -352,6 +365,7 @@ client_j = FakeClient(job_j)
 
 
 def executor_j(context: RunContext) -> None:
+    write_fake_video(context.run_dir)
     persist_terminal(context.run_dir, RunStatus.SUCCESS)
 
 

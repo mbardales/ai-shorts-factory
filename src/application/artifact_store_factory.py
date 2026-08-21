@@ -21,6 +21,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from application.artifacts import ArtifactStore, LocalArtifactStore
 from application.s3_artifacts import S3CompatibleArtifactStore
@@ -160,6 +161,29 @@ def _validate_s3_config(
             + ", ".join(faltantes)
             + "."
         )
+
+
+def describe_storage_config() -> dict[str, str]:
+    """Huella operativa de la configuración declarada en el entorno (ME40.9F).
+
+    Lectura **pura** de ``os.environ``: no construye clientes ni valida
+    completitud (para eso está :func:`build_artifact_store`). Expone solo
+    valores públicos — backend, bucket y host del endpoint — jamás
+    credenciales, tokens ni URLs completas. Sirve para detectar
+    configuraciones divergentes entre procesos (API vs worker) antes de
+    reclamar trabajo.
+    """
+    backend = _env(OBJECT_STORAGE_BACKEND).lower() or BACKEND_LOCAL
+    if backend == BACKEND_LOCAL:
+        return {"backend": BACKEND_LOCAL}
+    if backend == BACKEND_S3:
+        endpoint = _env(OBJECT_STORAGE_ENDPOINT)
+        host = urlsplit(endpoint).hostname or "" if endpoint else ""
+        huella = {"backend": BACKEND_S3, "bucket": _env(OBJECT_STORAGE_BUCKET)}
+        if host:
+            huella["endpoint_host"] = host
+        return huella
+    return {"backend": backend}
 
 
 def build_artifact_store(runs_root: Path) -> ArtifactStore:

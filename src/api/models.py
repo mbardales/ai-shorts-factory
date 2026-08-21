@@ -184,9 +184,16 @@ class SetActiveProjectRequest(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Respuesta de ``GET /api/v1/health``."""
+    """Respuesta de ``GET /api/v1/health``.
+
+    ME40.9F: ``artifacts`` expone aditivamente la huella operativa del backend
+    de artefactos en uso (solo valores públicos: backend/bucket/endpoint_host;
+    jamás credenciales). Permite al worker detectar configuraciones
+    divergentes antes de reclamar jobs.
+    """
 
     status: str
+    artifacts: Optional[dict[str, str]] = None
 
 
 class WorkerJobResponse(BaseModel):

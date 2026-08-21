@@ -37,10 +37,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
 
 from pipeline.context import RUNS_ROOT
+from config import load_project_env
 
 from application import ApplicationService, WorkerService
 from application.artifact_access import ArtifactAccess
-from application.artifact_store_factory import build_artifact_store
+from application.artifact_store_factory import (
+    build_artifact_store,
+    describe_storage_config,
+)
 from application.exceptions import ApplicationVideoNotFoundError, WorkerUnauthorizedError
 from application.models import CreateProjectRequest as AppCreateProjectRequest
 from application.models import CreateRunRequest as AppCreateRunRequest
@@ -277,7 +281,12 @@ def create_app(
         summary="Health check (no ejecuta el pipeline)",
     )
     def health() -> HealthResponse:
-        return HealthResponse(status="ok")
+        # ME40.9F: huella aditiva del backend de artefactos (sin secretos)
+        # para que el worker detecte configuraciones divergentes al arrancar.
+        return HealthResponse(
+            status="ok",
+            artifacts=_storage_fingerprint(artifact_access),
+        )
 
     def _require_worker_auth(authorization: Optional[str]) -> None:
         """Rechaza (401) peticiones worker sin token Bearer válido."""
@@ -357,15 +366,39 @@ def create_app(
 def _build_artifact_access(runs_root: Optional[Path]) -> ArtifactAccess:
     """Construye el :class:`ArtifactAccess` de la API (fail-fast).
 
-    Resuelve la raíz de ejecuciones efectiva (explícita o el valor por defecto
-    de ``pipeline.context``) y delega en :func:`build_artifact_store` (backend
-    ``local`` salvo configuración explícita). Una configuración de backend
-    inválida (p. ej. ``s3`` sin boto3, sin credenciales o sin endpoint) hace
-    que ``create_app()`` falle al arrancar: los fallos reales de producción
-    no se ocultan silenciosamente.
+    ME40.9F: carga primero el ``.env`` raíz (``load_project_env``) para que la
+    API resuelva ``OBJECT_STORAGE_*`` por el mismo camino que el worker
+    (paridad operativa); las variables ya definidas en el proceso tienen
+    prioridad (``override=False``). Resuelve la raíz de ejecuciones efectiva
+    (explícita o el valor por defecto de ``pipeline.context``) y delega en
+    :func:`build_artifact_store` (backend ``local`` salvo configuración
+    explícita). Una configuración de backend inválida (p. ej. ``s3`` sin
+    boto3, sin credenciales o sin endpoint) hace que ``create_app()`` falle al
+    arrancar: los fallos reales de producción no se ocultan silenciosamente.
     """
+    load_project_env()
     artifact_root = runs_root if runs_root is not None else RUNS_ROOT
     return ArtifactAccess(build_artifact_store(artifact_root))
+
+
+def _storage_fingerprint(access: ArtifactAccess) -> dict[str, str]:
+    """Huella operativa del backend de artefactos en uso (ME40.9F).
+
+    Pregunta al store real (duck typing sobre ``describe``) para que la huella
+    refleje el acceso efectivo, también cuando se inyecta uno en pruebas; si
+    el store no la declara, cae a la configuración declarada en el entorno.
+    Nunca incluye credenciales.
+    """
+    describe = getattr(access.store, "describe", None)
+    if callable(describe):
+        try:
+            huella = describe()
+        except Exception as exc:  # noqa: BLE001 - /health nunca debe fallar
+            logger.warning("No se pudo obtener la huella del store: %s", exc)
+        else:
+            if isinstance(huella, dict) and huella:
+                return {str(k): str(v) for k, v in huella.items()}
+    return describe_storage_config()
 
 
 #: Instancia por defecto para ``uvicorn api.app:app``.

@@ -27,6 +27,7 @@ import logging
 import uuid
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
+from urllib.parse import urlsplit
 
 from application.artifacts import (
     ArtifactError,
@@ -123,6 +124,19 @@ class S3CompatibleArtifactStore(ArtifactStore):
         self._secret_key = secret_key.strip()
         self._region = (region.strip() or DEFAULT_REGION)
         self._client = client
+
+    def describe(self) -> dict[str, str]:
+        """Huella operativa no sensible del backend S3 (ME40.9F).
+
+        Solo expone identidad operativa pública: backend, bucket y host del
+        endpoint (sin esquema, puerto, path, credenciales ni región). Jamás
+        incluye ``access_key``/``secret_key`` ni la URL completa del endpoint.
+        """
+        host = urlsplit(self._endpoint).hostname or ""
+        huella = {"backend": "s3", "bucket": self._bucket}
+        if host:
+            huella["endpoint_host"] = host
+        return huella
 
     # -- utilidades internas -------------------------------------------------
 

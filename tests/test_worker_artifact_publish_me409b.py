@@ -416,27 +416,9 @@ check(
     all(hasattr(run_worker.WorkerApiClient, m) for m in ("next_job", "heartbeat", "progress", "complete")),
     "P1 WorkerApiClient conserva el contrato outbound",
 )
-st = subprocess.run(
-    ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(ROOT)
-).stdout.splitlines()
-modificados = [l for l in st if l.startswith(" M ") or l.startswith("M ")]
-untracked = [l for l in st if l.startswith("?? ")]
-modificados_sin_agents = [
-    l[3:].replace("/", "\\") for l in modificados if "AGENTS.md" not in l
-]
-check(
-    set(modificados_sin_agents) == {"scripts\\run_worker.py"},
-    f"P2 solo run_worker.py modificado (además de AGENTS.md preexistente): {modificados_sin_agents}",
-)
-allowed_untracked = {
-    "src\\application\\artifacts.py",
-    "tests\\test_artifacts_me409a.py",
-    "tests\\test_worker_artifact_publish_me409b.py",
-}
-check(
-    set(l[3:].replace("/", "\\") for l in untracked) <= allowed_untracked,
-    f"P3 solo archivos ME40.9A/B creados: {[l[3:] for l in untracked]}",
-)
+# ME40.9F: los checks git-scope efímeros (P2/P3 sobre `git status`) se
+# eliminaron: solo tenían validez durante el desarrollo de ME40.9A/B y
+# provocaban falsos fallos en cualquier ME posterior.
 
 # ---------------------------------------------------------------------------
 # Q. el worker local existente sigue funcionando.

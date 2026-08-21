@@ -64,6 +64,9 @@ for path in (TEST_RUNS,):
 TEST_RUNS.mkdir(parents=True, exist_ok=True)
 
 os.environ[RUNS_ENV] = str(TEST_RUNS)
+#: ME40.9F: la API carga el .env raíz; estos tests validan almacenamiento
+#: local, así que fijan el backend explícitamente (el env gana sobre .env).
+os.environ["OBJECT_STORAGE_BACKEND"] = "local"
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))

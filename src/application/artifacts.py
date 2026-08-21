@@ -254,6 +254,17 @@ class ArtifactStore(ABC):
             "get_temporary_url."
         )
 
+    def describe(self) -> dict[str, str]:
+        """Huella operativa no sensible del backend (ME40.9F).
+
+        Se usa para detectar configuraciones divergentes entre procesos
+        (API vs worker) sin exponer credenciales: solo identidad de backend
+        y parámetros operativos públicos (p. ej. bucket, host del endpoint).
+        Los stores concretos la sobrescriben; el valor por defecto es
+        deliberadamente neutro para stores inyectados que no la declaren.
+        """
+        return {"backend": "unknown"}
+
 
 class LocalArtifactStore(ArtifactStore):
     """Registro local de artefactos dentro del directorio de cada run.
@@ -439,3 +450,7 @@ class LocalArtifactStore(ArtifactStore):
                 f"No existe el archivo del artefacto: {record.reference}"
             )
         return resolved.read_bytes()
+
+    def describe(self) -> dict[str, str]:
+        """Huella del backend local: solo identidad (sin rutas ni secretos)."""
+        return {"backend": "local"}

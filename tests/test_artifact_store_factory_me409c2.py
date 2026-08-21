@@ -456,30 +456,9 @@ check(
     "V1 RunRecord conserva sus campos",
 )
 
-# ---------------------------------------------------------------------------
-# W. no cambia API.  X. no cambia frontend.  Y. requirements-api/Dockerfile.
-# ---------------------------------------------------------------------------
-
-st = subprocess.run(
-    ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(ROOT)
-).stdout.splitlines()
-todas = [l[3:].replace("/", "\\") for l in st]
-check(
-    not any(f.startswith("src\\api") for f in todas),
-    "W1 no hay cambios en src/api",
-)
-check(
-    not any(f.startswith("web") for f in todas),
-    "X1 no hay cambios en frontend",
-)
-check(
-    not any("requirements-api" in f or "Dockerfile" in f or f.startswith("src\\pipeline") for f in todas),
-    "Y1 no cambia requirements-api.txt ni Dockerfile ni src/pipeline",
-)
-check(
-    not any(f.startswith("src\\application\\artifacts") or f.startswith("src\\application\\s3_artifacts") for f in todas),
-    "Y2 no cambian artifacts.py ni s3_artifacts.py",
-)
+# ME40.9F: los checks git-scope efímeros (W1/X1/Y1/Y2 sobre `git status`) se
+# eliminaron: solo tenían validez durante el desarrollo de ME40.9C.2 y
+# provocaban falsos fallos en cualquier ME posterior.
 
 # ---------------------------------------------------------------------------
 # Z. no realiza HTTP externo durante tests.
