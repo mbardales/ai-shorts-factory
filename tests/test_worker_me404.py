@@ -75,6 +75,10 @@ TEST_RUNS.mkdir(parents=True, exist_ok=True)
 os.environ[RUNS_ENV] = str(TEST_RUNS)
 #: Secreto del protocolo worker para esta ejecución de tests (solo entorno).
 os.environ["WORKER_TOKEN"] = TEST_TOKEN
+#: ME40.9E: estos tests validan la entrega LOCAL; se fija el backend para que
+#: el .env (OBJECT_STORAGE_BACKEND=s3 del E2E) no desvíe la publicación del
+#: worker hacia R2 mientras la API del test sirve el store local.
+os.environ["OBJECT_STORAGE_BACKEND"] = "local"
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))

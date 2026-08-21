@@ -470,6 +470,57 @@ class ApplicationService:
                 f"{run_id}: {exc}"
             ) from exc
 
+    def supports_temporary_urls(self) -> bool:
+        """Indica si el backend de artifacts emite URLs temporales (ME40.9E).
+
+        Delega en :class:`ArtifactAccess`: los backends remotos S3/R2 firman
+        presigned URLs (``True``) y el backend local custodia el archivo y lo
+        sirve en línea a través del control plane (``False``). La API usa esta
+        señal para elegir entre redirección 307 y entrega inline **sin**
+        conocer el proveedor.
+        """
+        return self._resolve_artifact_access().supports_temporary_url()
+
+    def get_video_content(self, run_id: str) -> Optional[bytes]:
+        """Contenido binario del video de un run, si existe (ME40.9E).
+
+        Modo de entrega del backend local: valida el ``run_id``, comprueba la
+        existencia del run (mismo mecanismo que :meth:`get_run`) y delega
+        **exclusivamente** en :class:`ArtifactAccess` →
+        :meth:`ArtifactStore.read_content`. El servicio nunca accede al
+        filesystem ni genera contenido; solo transporta los bytes que el store
+        custodia. Devuelve ``None`` si el run no tiene video publicada.
+
+        Args:
+            run_id: identificador de la ejecución.
+
+        Returns:
+            Contenido binario del video, o ``None`` si no hay video.
+
+        Raises:
+            ApplicationValidationError: si el ``run_id`` es inválido.
+            ApplicationRunNotFoundError: si no existe el run.
+            ApplicationError: si el backend falla al leer el contenido o no
+                puede servirlo en línea.
+        """
+        self._build_context(run_id)
+        try:
+            exists = self._repository.run_exists(run_id)
+        except PipelineValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        if not exists:
+            raise ApplicationRunNotFoundError(f"No existe el run: {run_id}")
+
+        access = self._resolve_artifact_access()
+        try:
+            return access.get_video_content(run_id)
+        except ArtifactValidationError as exc:
+            raise ApplicationValidationError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - error del store -> aplicación
+            raise ApplicationError(
+                f"No se pudo leer el video del run {run_id}: {exc}"
+            ) from exc
+
     # ------------------------------------------------------------------
     # Ayudantes
     # ------------------------------------------------------------------

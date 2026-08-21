@@ -164,17 +164,26 @@ def create_app(
 
     @app.get(
         "/api/v1/runs/{run_id}/video",
-        response_class=RedirectResponse,
-        summary="Redirige (307) a la URL temporal firmada del video del run",
+        response_class=Response,
+        summary="Entrega el video del run: 307 a presigned URL (S3/R2) o "
+        "contenido inline (backend local)",
     )
-    def get_run_video(run_id: str) -> RedirectResponse:
-        url = service.get_video_temporary_url(run_id, VIDEO_URL_EXPIRES_SECONDS)
-        if url is None:
+    def get_run_video(run_id: str) -> Response:
+        if service.supports_temporary_urls():
+            url = service.get_video_temporary_url(run_id, VIDEO_URL_EXPIRES_SECONDS)
+            if url is None:
+                raise ApplicationVideoNotFoundError(
+                    f"No hay video publicada para el run: {run_id}"
+                )
+            logger.info("HTTP GET /api/v1/runs/%s/video -> 307", run_id)
+            return RedirectResponse(url, status_code=307)
+        content = service.get_video_content(run_id)
+        if content is None:
             raise ApplicationVideoNotFoundError(
                 f"No hay video publicada para el run: {run_id}"
             )
-        logger.info("HTTP GET /api/v1/runs/%s/video -> 307", run_id)
-        return RedirectResponse(url, status_code=307)
+        logger.info("HTTP GET /api/v1/runs/%s/video -> 200 (inline local)", run_id)
+        return Response(content=content, media_type="video/mp4")
 
     @app.get(
         "/api/v1/runs/{run_id}/artifacts",

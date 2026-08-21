@@ -9,6 +9,12 @@ ME40.9D.3.3:
 - ``get_video_temporary_url`` delega en :meth:`ArtifactStore.get_temporary_url`
   para obtener una URL temporal firmada del video (si el backend puede firmar).
 - El store es la única fuente de URLs temporales; esta capa no genera URLs.
+
+ME40.9E:
+- ``supports_temporary_url`` expone la capacidad del store (presign vs
+  custodia local) para que la capa superior elija el modo de entrega.
+- ``get_video_content`` delega en :meth:`ArtifactStore.read_content` (solo
+  backends custodios del archivo); esta capa no lee filesystem ni S3.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from __future__ import annotations
 from typing import Optional
 
 from application.artifacts import (
+    ArtifactContentUnavailableError,
     ArtifactRecord,
     ArtifactStore,
     ArtifactValidationError,
@@ -105,5 +112,43 @@ class ArtifactAccess:
         video = self.get_video(validated_run_id)
         if video is None:
             return None
-
         return self._store.get_temporary_url(video.artifact_id, expires_in)
+
+    def supports_temporary_url(self) -> bool:
+        """Indica si el store subyacente emite URLs temporales (ME40.9E).
+
+        Usa el atributo del contrato :attr:`ArtifactStore.supports_temporary_url`;
+        para stores que no expongan el atributo se asume ``True`` (mismo
+        criterio conservador que el guard de presign de ME40.9D.3.1).
+        """
+        return bool(getattr(self._store, "supports_temporary_url", True))
+
+    def get_video_content(self, run_id: str) -> Optional[bytes]:
+        """Contenido binario del video de un run, si existe (ME40.9E).
+
+        Localiza exclusivamente el artifact de video del run (aislamiento por
+        ``run_id``, reutiliza :meth:`get_video`) y delega la lectura en
+        :meth:`ArtifactStore.read_content`: solo los backends que custodian el
+        archivo sirven contenido; esta capa no accede al filesystem ni a S3.
+
+        Args:
+            run_id: identificador de la ejecución.
+
+        Returns:
+            Contenido binario del video, o ``None`` si el run no tiene video.
+
+        Raises:
+            ArtifactValidationError: si el ``run_id`` es inválido.
+            ArtifactContentUnavailableError: si el backend no sirve contenido
+                en línea (p. ej. S3/R2: la entrega es por URL temporal).
+            ArtifactError: si el store falla al leer el contenido.
+        """
+        video = self.get_video(run_id)
+        if video is None:
+            return None
+        read = getattr(self._store, "read_content", None)
+        if not callable(read):
+            raise ArtifactContentUnavailableError(
+                "El store inyectado no sirve contenido en línea."
+            )
+        return read(video.artifact_id)

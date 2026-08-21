@@ -67,6 +67,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from application import ApplicationService, CreateRunRequest
+from application.artifacts import LocalArtifactStore  # noqa: E402
 from api.app import create_app
 from fastapi.testclient import TestClient
 from pipeline import (
@@ -255,10 +256,16 @@ with TestClient(app) as c:
     j = rr.json()
     check("G1 estado QUALITY_FAILED", j.get("status") == "QUALITY_FAILED", str(j))
     check("G2 video_path conservado", bool(j.get("video_path")), str(j))
+    # ME40.9E: la entrega del video pasa por artifacts publicados; el
+    # ejecutor fake no pasa por el worker (que es quien publica), así que el
+    # test publica el video renderizado en el store local.
+    local_artifacts = LocalArtifactStore(TEST_RUNS)
+    local_artifacts.publish(run3, "output/video/video.mp4", kind="video")
     rv = c.get(f"/api/v1/runs/{run3}/video", timeout=10)
     check("G3 video servible en QUALITY_FAILED", rv.status_code == 200 and b"ftyp" in rv.content[:64], f"status={rv.status_code} bytes={len(rv.content)}")
 
     # M. Video funciona (SUCCESS con video).
+    local_artifacts.publish(run2, "output/video/video.mp4", kind="video")
     rv = c.get(f"/api/v1/runs/{run2}/video", timeout=10)
     check("M1 GET video 200 video/mp4",
           rv.status_code == 200 and rv.headers.get("content-type", "").startswith("video/mp4"),

@@ -68,6 +68,15 @@ class ArtifactUrlUnavailableError(ArtifactError):
     """
 
 
+class ArtifactContentUnavailableError(ArtifactError):
+    """El backend no puede servir el contenido del artefacto en línea.
+
+    Solo los backends que custodian el archivo físicamente (p. ej. el local)
+    pueden leerlo y entregarlo; los backends remotos entregan mediante URLs
+    temporales firmadas (nunca descargando en nombre del cliente, ME40.9E).
+    """
+
+
 def validate_expires_in(expires_in: object) -> int:
     """Valida la expiración de una URL temporal (segundos, entero positivo).
 
@@ -212,6 +221,39 @@ class ArtifactStore(ABC):
                 temporal segura (p. ej. local o cliente S3 sin presign).
         """
 
+    @property
+    def supports_temporary_url(self) -> bool:
+        """Indica si el backend emite URLs temporales firmadas (ME40.9E).
+
+        Por defecto ``True`` (los backends remotos entregan por presign); los
+        backends que custodian el archivo localmente lo sobrescriben a
+        ``False`` y sirven el contenido vía :meth:`read_content`.
+        """
+        return True
+
+    def read_content(self, artifact_id: str) -> bytes:
+        """Lee el contenido físico del artefacto (solo backends custodios).
+
+        Implementación por defecto: **ninguna**. Los backends remotos no
+        descargan objetos en nombre del cliente (la entrega es por URL
+        temporal); solo el backend que custodia el archivo localmente
+        (:class:`LocalArtifactStore`) implementa la lectura segura.
+
+        Args:
+            artifact_id: identificador único del artefacto.
+
+        Returns:
+            Contenido binario completo del artefacto.
+
+        Raises:
+            ArtifactContentUnavailableError: si el backend no sirve contenido
+                en línea (comportamiento por defecto).
+        """
+        raise ArtifactContentUnavailableError(
+            "El backend de artefactos no sirve contenido en línea; use "
+            "get_temporary_url."
+        )
+
 
 class LocalArtifactStore(ArtifactStore):
     """Registro local de artefactos dentro del directorio de cada run.
@@ -348,3 +390,52 @@ class LocalArtifactStore(ArtifactStore):
             "artefacto es privado y se servirá a través del control plane, "
             "no con una URL pública."
         )
+
+    @property
+    def supports_temporary_url(self) -> bool:
+        """El backend local custodia el archivo: entrega inline, sin presign."""
+        return False
+
+    def read_content(self, artifact_id: str) -> bytes:
+        """Lee el contenido físico del artefacto (entrega segura ME40.9E).
+
+        Única vía de lectura del archivo: resuelve el registro por
+        ``artifact_id``, reconstruye el directorio del run validado y resuelve
+        la referencia **dentro** del run (guard de traversal), manteniendo el
+        aislamiento estricto por ``run_id``. Nunca sirve archivos fuera del
+        run ni rutas absolutas del cliente.
+
+        Args:
+            artifact_id: identificador único del artefacto.
+
+        Returns:
+            Contenido binario completo del artefacto.
+
+        Raises:
+            ArtifactValidationError: si ``artifact_id`` es inválido o la
+                referencia queda fuera del directorio del run (traversal).
+            ArtifactNotFoundError: si el registro o el archivo físico no
+                existen.
+        """
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ArtifactValidationError("artifact_id inválido o ausente.")
+        record = self.get(artifact_id)
+        if record is None:
+            raise ArtifactNotFoundError(f"No existe el artefacto: {artifact_id}")
+        run_dir = self._run_dir(record.run_id)
+        candidate = run_dir / record.reference
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise ArtifactValidationError(
+                f"No se puede resolver el artefacto {record.reference}: {exc}"
+            ) from exc
+        if not resolved.is_relative_to(run_dir.resolve()):
+            raise ArtifactValidationError(
+                f"El artefacto queda fuera del run (traversal): {record.reference}"
+            )
+        if not resolved.is_file():
+            raise ArtifactNotFoundError(
+                f"No existe el archivo del artefacto: {record.reference}"
+            )
+        return resolved.read_bytes()

@@ -81,6 +81,7 @@ from application.exceptions import (  # noqa: E402
     ApplicationRunNotFoundError,
     ApplicationValidationError,
 )
+from application.artifacts import LocalArtifactStore  # noqa: E402
 from api.app import create_app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from pipeline import (  # noqa: E402
@@ -123,11 +124,16 @@ def new_run(service: ApplicationService, run_id: str, *, project_id: Optional[st
 
 
 def make_success_with_video(run_id: str) -> None:
-    """Persiste SUCCESS con un video falso (sin pipeline real)."""
+    """Persiste SUCCESS con un video falso (sin pipeline real).
+
+    ME40.9E: además publica el video en el store local de artifacts
+    (``artifacts.json``), única vía de entrega desde la API.
+    """
     run_dir = TEST_RUNS / run_id
     vdir = run_dir / "output" / "video"
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "video.mp4").write_bytes(FAKE_MP4)
+    LocalArtifactStore(TEST_RUNS).publish(run_id, "output/video/video.mp4", kind="video")
     prev = load_run_record(run_dir)
     write_run_record(
         run_dir,

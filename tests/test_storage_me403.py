@@ -74,6 +74,7 @@ from application import (  # noqa: E402
     RunStorage,
     StorageError,
 )
+from application.artifacts import LocalArtifactStore  # noqa: E402
 from api.app import create_app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from pipeline import (  # noqa: E402
@@ -154,6 +155,13 @@ make_run(RUN_UNKNOWN, RunStatus.UNKNOWN, with_output=False)
 make_run(RUN_NO_VIDEO, RunStatus.SUCCESS, quality_passed=True)
 # Run generado antes de ME40.3: run.json SIN queued_at.
 make_run(RUN_LEGACY, RunStatus.SUCCESS, video=True, quality_passed=True, legacy=True)
+
+# ME40.9E: la entrega del video pasa por artifacts publicados (artifacts.json).
+# Los fixtures con video servible se publican en el store local; los runs sin
+# video (RUNNING/FAILED/UNKNOWN/NO_VIDEO) NO se publican -> 404.
+artifact_store = LocalArtifactStore(TEST_RUNS)
+artifact_store.publish(RUN_SUCCESS, "output/video/video.mp4", kind="video")
+artifact_store.publish(RUN_QF, "output/video/video.mp4", kind="video")
 
 # ---------------------------------------------------------------------------
 # A-C. LocalRunStorage: contrato, localización de run y de video
@@ -403,6 +411,9 @@ check("R2 offline SUCCESS", rec is not None and rec.status is RunStatus.SUCCESS,
 check("R3 offline Quality Gate PASS", rec is not None and rec.quality_passed is True, str(rec))
 video_cli = storage.resolve_video(cli_id)
 check("R4 LocalRunStorage resuelve el video del run offline", video_cli is not None, str(video_cli))
+# ME40.9E: el pipeline CLI no publica artifacts (solo el worker); para la
+# entrega por artifacts.json el test publica el video renderizado.
+artifact_store.publish(cli_id, video_cli, kind="video")
 with TestClient(app) as c:
     rv = c.get(f"/api/v1/runs/{cli_id}/video", timeout=10)
     check("R5 API sirve el video del run offline",
